@@ -3,6 +3,7 @@ package handler
 import (
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/dsnikitin/shortener/internal/config"
 )
@@ -43,7 +44,7 @@ func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusCreated)
 
 	io.WriteString(w, config.ShortURLBase+"/"+id)
@@ -55,7 +56,7 @@ func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := strings.TrimPrefix(r.URL.Path, "/")
 	if id == "" {
 		http.Error(w, "id is required", http.StatusBadRequest)
 		return
@@ -67,5 +68,6 @@ func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Content-Type", "text/plain")
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 }
