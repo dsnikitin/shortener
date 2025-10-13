@@ -10,11 +10,12 @@ import (
 )
 
 func main() {
+	c := config.NewFromArgs()
 	r := repository.NewMemory()
 	s := service.New(r)
-	h := handler.New(s)
+	h := handler.New(c, s)
 
-	if err := http.ListenAndServe(config.ServerAddr, newChiMux(h)); err != nil {
+	if err := http.ListenAndServe(c.ServerAddr, newChiMux(h)); err != nil {
 		panic(err)
 	}
 }

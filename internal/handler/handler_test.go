@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/dsnikitin/shortener/internal/config"
 	"github.com/dsnikitin/shortener/internal/handler"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
@@ -40,8 +41,13 @@ func TestHandler_Shorten(t *testing.T) {
 		resBody string
 	}
 
+	conf := &config.Config{
+		ServerAddr:       "localhost:8080",
+		ShortURLBaseAddr: "http://localhost:8080",
+	}
+
 	s := new(MockService)
-	h := handler.New(s)
+	h := handler.New(conf, s)
 
 	r := chi.NewRouter()
 	r.Post("/", h.Shorten)
@@ -120,8 +126,13 @@ func TestHandler_Redirect(t *testing.T) {
 		resBody string
 	}
 
+	conf := &config.Config{
+		ServerAddr:       "localhost:8080",
+		ShortURLBaseAddr: "http://localhost:8080",
+	}
+
 	s := new(MockService)
-	h := handler.New(s)
+	h := handler.New(conf, s)
 
 	r := chi.NewRouter()
 	r.Get("/{id}", h.Redirect)

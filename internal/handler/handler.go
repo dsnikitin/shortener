@@ -14,11 +14,15 @@ type Service interface {
 }
 
 type Handler struct {
-	s Service
+	conf *config.Config
+	s    Service
 }
 
-func New(s Service) *Handler {
-	return &Handler{s: s}
+func New(conf *config.Config, s Service) *Handler {
+	return &Handler{
+		conf: conf,
+		s:    s,
+	}
 }
 
 func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
@@ -42,7 +46,7 @@ func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusCreated)
 
-	io.WriteString(w, config.ShortURLBase+"/"+id)
+	io.WriteString(w, h.conf.ShortURLBaseAddr+"/"+id)
 }
 
 func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request) {
