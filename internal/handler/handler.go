@@ -3,9 +3,9 @@ package handler
 import (
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/dsnikitin/shortener/internal/config"
+	"github.com/go-chi/chi/v5"
 )
 
 type Service interface {
@@ -22,11 +22,6 @@ func New(s Service) *Handler {
 }
 
 func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "only POST requests are allowed", http.StatusBadRequest)
-		return
-	}
-
 	bytes, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -51,14 +46,9 @@ func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "оnly GET requests are allowed", http.StatusBadRequest)
-		return
-	}
-
-	id := strings.TrimPrefix(r.URL.Path, "/")
-	if id == "" {
-		http.Error(w, "id is required", http.StatusBadRequest)
+	id := chi.URLParam(r, "id")
+	if id == "" || len(id) > config.IDMaxLength {
+		http.Error(w, "incorrect id", http.StatusBadRequest)
 		return
 	}
 

@@ -14,7 +14,7 @@ func main() {
 	s := service.New(r)
 	h := handler.New(s)
 
-	if err := http.ListenAndServe(config.ServerAddr, newServeMux(h)); err != nil {
+	if err := http.ListenAndServe(config.ServerAddr, newChiMux(h)); err != nil {
 		panic(err)
 	}
 }

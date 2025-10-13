@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/dsnikitin/shortener/internal/handler"
+	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -42,6 +43,9 @@ func TestHandler_Shorten(t *testing.T) {
 	s := new(MockService)
 	h := handler.New(s)
 
+	r := chi.NewRouter()
+	r.Post("/", h.Shorten)
+
 	tests := []struct {
 		name             string
 		method           string
@@ -68,9 +72,7 @@ func TestHandler_Shorten(t *testing.T) {
 			reqBody:          "https://practicum.yandex.ru/",
 			servicesMockCall: func() {},
 			want: want{
-				code:    http.StatusBadRequest,
-				headers: headers{contentType: "text/plain; charset=utf-8"},
-				resBody: "only POST requests are allowed\n",
+				code: http.StatusMethodNotAllowed,
 			},
 		},
 		{
@@ -88,12 +90,13 @@ func TestHandler_Shorten(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			req := httptest.NewRequest(test.method, "/", bytes.NewBufferString(test.reqBody))
 			test.servicesMockCall()
 
-			recoder := httptest.NewRecorder()
-			h.Shorten(recoder, req)
-			res := recoder.Result()
+			req := httptest.NewRequest(test.method, "/", bytes.NewBufferString(test.reqBody))
+			recorder := httptest.NewRecorder()
+
+			r.ServeHTTP(recorder, req)
+			res := recorder.Result()
 
 			defer res.Body.Close()
 			resBody, err := io.ReadAll(res.Body)
@@ -120,6 +123,9 @@ func TestHandler_Redirect(t *testing.T) {
 	s := new(MockService)
 	h := handler.New(s)
 
+	r := chi.NewRouter()
+	r.Get("/{id}", h.Redirect)
+
 	tests := []struct {
 		name             string
 		id               string
@@ -143,50 +149,51 @@ func TestHandler_Redirect(t *testing.T) {
 			},
 		},
 		{
-			name:             "wrong method",
-			id:               "abcdefg",
-			method:           http.MethodPost,
-			servicesMockCall: func() {},
-			want: want{
-				code:    http.StatusBadRequest,
-				headers: headers{contentType: "text/plain; charset=utf-8"},
-				resBody: "оnly GET requests are allowed\n",
-			},
-		},
-		{
 			name:             "empty id",
 			id:               "",
 			method:           http.MethodGet,
 			servicesMockCall: func() {},
 			want: want{
-				code:    http.StatusBadRequest,
+				code:    http.StatusNotFound,
 				headers: headers{contentType: "text/plain; charset=utf-8"},
-				resBody: "id is required\n",
+				resBody: "404 page not found\n",
 			},
 		},
 		{
-			name:   "id not found",
+			name:             "too large id",
+			id:               "abcdefghi",
+			method:           http.MethodGet,
+			servicesMockCall: func() {},
+			want: want{
+				code:    http.StatusBadRequest,
+				headers: headers{contentType: "text/plain; charset=utf-8"},
+				resBody: "incorrect id\n",
+			},
+		},
+		{
+			name:   "not found",
 			id:     "gfedcba",
 			method: http.MethodGet,
 			servicesMockCall: func() {
-				s.On("GetOriginal", "gfedcba").Return("", errors.New("url not found")).Once()
+				s.On("GetOriginal", "gfedcba").Return("", errors.New("id not found")).Once()
 			},
 			want: want{
 				code:    http.StatusBadRequest,
 				headers: headers{contentType: "text/plain; charset=utf-8"},
-				resBody: "url not found\n",
+				resBody: "id not found\n",
 			},
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			req := httptest.NewRequest(test.method, "/"+test.id, nil)
 			test.servicesMockCall()
 
-			recoder := httptest.NewRecorder()
-			h.Redirect(recoder, req)
-			res := recoder.Result()
+			req := httptest.NewRequest(test.method, "/"+test.id, nil)
+			recorder := httptest.NewRecorder()
+
+			r.ServeHTTP(recorder, req)
+			res := recorder.Result()
 
 			defer res.Body.Close()
 			resBody, err := io.ReadAll(res.Body)

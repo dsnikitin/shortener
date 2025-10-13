@@ -38,5 +38,5 @@ func (r *MemoryRepository) Get(id string) (*model.URL, error) {
 		return &model.URL{ID: id, Original: url}, nil
 	}
 
-	return nil, errors.New("url id not found")
+	return nil, errors.New("id id not found")
 }

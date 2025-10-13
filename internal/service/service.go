@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"strings"
 
+	"github.com/dsnikitin/shortener/internal/config"
 	"github.com/dsnikitin/shortener/internal/model"
 )
 
@@ -45,7 +46,7 @@ func (s *Service) GetOriginal(id string) (string, error) {
 
 func generateID(url string) string {
 	hash := sha256.Sum256([]byte(url))
-	id := base64.URLEncoding.EncodeToString(hash[:8])[:8]
+	id := base64.URLEncoding.EncodeToString(hash[:config.IDMaxLength])[:config.IDMaxLength]
 
 	return strings.TrimRight(id, "=")
 }
