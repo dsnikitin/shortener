@@ -26,18 +26,18 @@ func New(conf *config.Config, s Service) *Handler {
 }
 
 func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
-	bytes, err := io.ReadAll(r.Body)
+	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	if len(bytes) == 0 {
+	if len(bodyBytes) == 0 {
 		http.Error(w, "empty body", http.StatusBadRequest)
 		return
 	}
 
-	id, err := h.s.CreateID(string(bytes))
+	id, err := h.s.CreateID(string(bodyBytes))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
