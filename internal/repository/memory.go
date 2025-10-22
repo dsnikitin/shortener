@@ -7,18 +7,15 @@ import (
 	"github.com/dsnikitin/shortener/internal/model"
 )
 
-type id = string
-type original = string
-
 type MemoryRepository struct {
 	mu      sync.RWMutex
-	storage map[id]original
+	storage map[string]string
 }
 
 func NewMemory() *MemoryRepository {
 	return &MemoryRepository{
 		mu:      sync.RWMutex{},
-		storage: make(map[id]original),
+		storage: make(map[string]string),
 	}
 }
 
