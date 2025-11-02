@@ -13,6 +13,7 @@ const (
 type Config struct {
 	ServerAddr       string
 	ShortURLBaseAddr string
+	LogLevel         string
 }
 
 func NewFromArgs() *Config {
@@ -20,6 +21,7 @@ func NewFromArgs() *Config {
 
 	flag.StringVar(&c.ServerAddr, "a", "localhost:8080", "server host:port")
 	flag.StringVar(&c.ShortURLBaseAddr, "b", "http://localhost:8080", "base short url")
+	flag.StringVar(&c.LogLevel, "l", "info", "log level")
 	flag.Parse()
 
 	if envServerAddr := os.Getenv("SERVER_ADDRESS"); envServerAddr != "" {
@@ -27,6 +29,9 @@ func NewFromArgs() *Config {
 	}
 	if envBaseURL := os.Getenv("BASE_URL"); envBaseURL != "" {
 		c.ShortURLBaseAddr = envBaseURL
+	}
+	if envLogLevel := os.Getenv("LOG_LEVEL"); envLogLevel != "" {
+		c.LogLevel = envLogLevel
 	}
 
 	return &c
