@@ -1,4 +1,4 @@
-package main
+package handler
 
 import (
 	"net/http"
@@ -29,7 +29,7 @@ func (w *loggingResWriter) WriteHeader(statusCode int) {
 	w.res.status = statusCode
 }
 
-func logging(h http.Handler) http.Handler {
+func Logging(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
@@ -50,7 +50,7 @@ func logging(h http.Handler) http.Handler {
 	})
 }
 
-func bodyMaxBytesReader(h http.Handler) http.Handler {
+func BodyMaxBytesReader(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, config.OriginalURLMaxLength)
 

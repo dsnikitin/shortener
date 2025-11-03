@@ -1,10 +1,13 @@
 package handler
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 
 	"github.com/dsnikitin/shortener/internal/config"
+	"github.com/dsnikitin/shortener/internal/logger"
+	"github.com/dsnikitin/shortener/internal/models"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -28,7 +31,8 @@ func New(conf *config.Config, s Service) *Handler {
 func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		logger.Log.Sugar().Errorw("cannot read request text body", "error", err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -47,6 +51,35 @@ func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 
 	io.WriteString(w, h.conf.ShortURLBaseAddr+"/"+id)
+}
+
+func (h *Handler) ShortenFromJSON(w http.ResponseWriter, r *http.Request) {
+	var req models.ShortenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logger.Log.Sugar().Errorw("cannot read request JSON body", "error", err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if len(req.URL) == 0 {
+		http.Error(w, "empty url", http.StatusBadRequest)
+		return
+	}
+
+	id, err := h.s.CreateID(req.URL)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+
+	resp := models.ShortenResponse{Result: h.conf.ShortURLBaseAddr + "/" + id}
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		logger.Log.Sugar().Errorw("encoding shorten response", "error", err)
+		return
+	}
 }
 
 func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request) {

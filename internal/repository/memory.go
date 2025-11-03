@@ -4,7 +4,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/dsnikitin/shortener/internal/model"
+	"github.com/dsnikitin/shortener/internal/models"
 )
 
 type MemoryRepository struct {
@@ -19,7 +19,7 @@ func NewMemory() *MemoryRepository {
 	}
 }
 
-func (r *MemoryRepository) Save(url *model.URL) error {
+func (r *MemoryRepository) Save(url *models.URL) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -27,12 +27,12 @@ func (r *MemoryRepository) Save(url *model.URL) error {
 	return nil
 }
 
-func (r *MemoryRepository) Get(id string) (*model.URL, error) {
+func (r *MemoryRepository) Get(id string) (*models.URL, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	if url, ok := r.storage[id]; ok {
-		return &model.URL{ID: id, Original: url}, nil
+		return &models.URL{ID: id, Original: url}, nil
 	}
 
 	return nil, errors.New("id not found")

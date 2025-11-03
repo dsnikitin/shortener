@@ -6,12 +6,12 @@ import (
 	"strings"
 
 	"github.com/dsnikitin/shortener/internal/config"
-	"github.com/dsnikitin/shortener/internal/model"
+	"github.com/dsnikitin/shortener/internal/models"
 )
 
 type Repository interface {
-	Save(url *model.URL) error
-	Get(id string) (*model.URL, error)
+	Save(url *models.URL) error
+	Get(id string) (*models.URL, error)
 }
 
 type Service struct {
@@ -23,7 +23,7 @@ func New(r Repository) *Service {
 }
 
 func (s *Service) CreateID(original string) (string, error) {
-	url := &model.URL{
+	url := &models.URL{
 		ID:       generateID(original),
 		Original: original,
 	}

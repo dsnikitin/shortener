@@ -9,9 +9,14 @@ import (
 
 func newChiMux(h *handler.Handler) *chi.Mux {
 	r := chi.NewRouter()
+	r.Use(handler.Logging)
 
-	r.With(logging, bodyMaxBytesReader).Post("/", http.HandlerFunc(h.Shorten))
-	r.With(logging).Get("/{id}", http.HandlerFunc(h.Redirect))
+	r.With(handler.BodyMaxBytesReader).Post("/", http.HandlerFunc(h.Shorten))
+	r.Get("/{id}", http.HandlerFunc(h.Redirect))
+
+	r.Route("/api", func(r chi.Router) {
+		r.With(handler.BodyMaxBytesReader).Post("/shorten", http.HandlerFunc(h.ShortenFromJSON))
+	})
 
 	return r
 }
