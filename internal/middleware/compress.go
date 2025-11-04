@@ -4,80 +4,95 @@ import (
 	"compress/gzip"
 	"io"
 	"net/http"
-	"strings"
+	"slices"
+	"sync"
 )
 
+var writerPool = sync.Pool{
+	New: func() any {
+		return gzip.NewWriter(io.Discard)
+	},
+}
+
+var readerPool = sync.Pool{
+	New: func() any {
+		return new(gzip.Reader)
+	},
+}
+
 type compressWriter struct {
-	rw  http.ResponseWriter
+	http.ResponseWriter
 	gzw *gzip.Writer
 }
 
 func newCompressWriter(rw http.ResponseWriter) *compressWriter {
+	gzw := writerPool.Get().(*gzip.Writer)
+	gzw.Reset(rw)
+
 	return &compressWriter{
-		rw:  rw,
-		gzw: gzip.NewWriter(rw),
+		ResponseWriter: rw,
+		gzw:            gzw,
 	}
 }
 
-func (w *compressWriter) Header() http.Header {
-	return w.rw.Header()
+func (cw *compressWriter) Write(p []byte) (int, error) {
+	return cw.gzw.Write(p)
 }
 
-func (w *compressWriter) Write(p []byte) (int, error) {
-	return w.gzw.Write(p)
-}
+func (cw *compressWriter) Close() error {
+	err := cw.gzw.Close()
 
-func (w *compressWriter) WriteHeader(statusCode int) {
-	if statusCode < 300 {
-		w.rw.Header().Set("Content-Encoding", "gzip")
+	if err != nil {
+		writerPool.Put(gzip.NewWriter(io.Discard))
+	} else {
+		writerPool.Put(cw.gzw)
 	}
-	w.rw.WriteHeader(statusCode)
-}
 
-func (w *compressWriter) Close() error {
-	return w.gzw.Close()
+	return err
 }
 
 type compressReader struct {
-	rc  io.ReadCloser
 	gzr *gzip.Reader
 }
 
 func newCompressReader(rc io.ReadCloser) (*compressReader, error) {
-	gzr, err := gzip.NewReader(rc)
-	if err != nil {
+	gzr := readerPool.Get().(*gzip.Reader)
+
+	if err := gzr.Reset(rc); err != nil {
+		readerPool.Put(gzr)
 		return nil, err
 	}
 
-	return &compressReader{rc: rc, gzr: gzr}, nil
+	return &compressReader{gzr: gzr}, nil
 }
 
-func (r *compressReader) Read(p []byte) (n int, err error) {
-	return r.gzr.Read(p)
+func (cr *compressReader) Read(p []byte) (n int, err error) {
+	return cr.gzr.Read(p)
 }
 
-func (r *compressReader) Close() error {
-	if err := r.rc.Close(); err != nil {
-		return err
-	}
-	return r.gzr.Close()
+func (cr *compressReader) Close() error {
+	readerPool.Put(cr.gzr)
+	return nil
 }
 
 func GzipCompress(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writer := w
 
-		if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+		acceptEncoding := r.Header.Values("Accept-Encoding")
+		if slices.Contains(acceptEncoding, "gzip") {
 			cw := newCompressWriter(w)
 			defer cw.Close()
 
 			writer = cw
+			writer.Header().Set("Content-Encoding", "gzip")
 		}
 
-		if strings.Contains(r.Header.Get("Content-Encoding"), "gzip") {
+		contentEncoding := r.Header.Values("Content-Encoding")
+		if slices.Contains(contentEncoding, "gzip") {
 			cr, err := newCompressReader(r.Body)
 			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
+				http.Error(writer, err.Error(), http.StatusInternalServerError)
 				return
 			}
 

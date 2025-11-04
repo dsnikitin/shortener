@@ -11,13 +11,13 @@ import (
 func newChiMux(h *handler.Handler) *chi.Mux {
 	r := chi.NewRouter()
 	r.Use(middleware.Logging)
+	r.Use(middleware.GzipCompress)
 
-	r.With(middleware.BodyMaxBytesReader, middleware.GzipCompress).Post("/", http.HandlerFunc(h.Shorten))
+	r.With(middleware.BodyMaxBytesReader).Post("/", http.HandlerFunc(h.Shorten))
 	r.Get("/{id}", http.HandlerFunc(h.Redirect))
 
 	r.Route("/api", func(r chi.Router) {
-		r.With(middleware.BodyMaxBytesReader, middleware.GzipCompress).
-			Post("/shorten", http.HandlerFunc(h.ShortenFromJSON))
+		r.With(middleware.BodyMaxBytesReader).Post("/shorten", http.HandlerFunc(h.ShortenFromJSON))
 	})
 
 	return r
