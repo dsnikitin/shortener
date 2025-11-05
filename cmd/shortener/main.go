@@ -14,29 +14,31 @@ import (
 )
 
 func main() {
-	conf := config.NewFromArgs()
+	conf, err := config.New()
+	if err != nil {
+		log.Fatalf("config init error: %s", err)
+	}
 
 	if err := logger.Initialize(conf.LogLevel); err != nil {
-		log.Fatalf("init logger error: %s", err)
+		log.Fatalf("logger init error: %s", err)
 	}
 
-	file, err := os.OpenFile(conf.FileStoragePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	repo, err := repository.New(conf.FileStoragePath)
 	if err != nil {
-		logger.Log.Sugar().Fatalw("open storage file", "error", err)
+		logger.Log.Sugar().Fatalw("failed to init repository", "error", err)
 	}
-	defer file.Close()
+	defer repo.Close()
 
-	repo, _ := repository.New(file)
 	service := service.New(repo)
 	handler := handler.New(conf, service)
 	server := initServer(conf, newChiMux(handler))
 
-	shutdownSignalChan := make(chan os.Signal, 1)
-	signal.Notify(shutdownSignalChan, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
+	shutdownSignal := make(chan os.Signal, 1)
+	signal.Notify(shutdownSignal, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 
 	go start(server)
 
-	<-shutdownSignalChan
+	<-shutdownSignal
 
 	logger.Log.Sugar().Info("received shutdown signal")
 	shutdown(server)

@@ -2,7 +2,8 @@ package config
 
 import (
 	"flag"
-	"os"
+
+	"github.com/caarlos0/env"
 )
 
 const (
@@ -11,14 +12,14 @@ const (
 )
 
 type Config struct {
-	ServerAddr       string
-	ShortURLBaseAddr string
-	LogLevel         string
-	FileStoragePath  string
+	ServerAddr       string `env:"SERVER_ADDRESS"`
+	ShortURLBaseAddr string `env:"BASE_URL"`
+	LogLevel         string `env:"LOG_LEVEL"`
+	FileStoragePath  string `env:"FILE_STORAGE_PATH"`
 }
 
-func NewFromArgs() *Config {
-	c := Config{}
+func New() (*Config, error) {
+	c := &Config{}
 
 	flag.StringVar(&c.ServerAddr, "a", "localhost:8080", "server host:port")
 	flag.StringVar(&c.ShortURLBaseAddr, "b", "http://localhost:8080", "base short url")
@@ -26,18 +27,9 @@ func NewFromArgs() *Config {
 	flag.StringVar(&c.FileStoragePath, "f", "shortener_storage.json", "file storage path")
 	flag.Parse()
 
-	if envServerAddr := os.Getenv("SERVER_ADDRESS"); envServerAddr != "" {
-		c.ServerAddr = envServerAddr
-	}
-	if envBaseURL := os.Getenv("BASE_URL"); envBaseURL != "" {
-		c.ShortURLBaseAddr = envBaseURL
-	}
-	if envLogLevel := os.Getenv("LOG_LEVEL"); envLogLevel != "" {
-		c.LogLevel = envLogLevel
-	}
-	if envFileStoragePath := os.Getenv("FILE_STORAGE_PATH"); envFileStoragePath != "" {
-		c.FileStoragePath = envFileStoragePath
+	if err := env.Parse(c); err != nil {
+		return nil, err
 	}
 
-	return &c
+	return c, nil
 }
