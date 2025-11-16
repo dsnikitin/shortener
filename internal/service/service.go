@@ -12,6 +12,8 @@ import (
 type Repository interface {
 	Save(url *models.URL) error
 	Get(id string) (*models.URL, error)
+	PingDB() error
+	Close()
 }
 
 type Service struct {
@@ -42,6 +44,10 @@ func (s *Service) GetOriginal(id string) (string, error) {
 	}
 
 	return url.Original, nil
+}
+
+func (s *Service) PingDB() error {
+	return s.r.PingDB()
 }
 
 func generateID(url string) string {

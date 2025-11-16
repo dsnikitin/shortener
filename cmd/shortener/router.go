@@ -15,6 +15,7 @@ func newChiMux(h *handler.Handler) *chi.Mux {
 
 	r.With(middleware.BodyMaxBytesReader).Post("/", http.HandlerFunc(h.Shorten))
 	r.Get("/{id}", http.HandlerFunc(h.Redirect))
+	r.Get("/ping", http.HandlerFunc(h.PingDB))
 
 	r.Route("/api", func(r chi.Router) {
 		r.With(middleware.BodyMaxBytesReader).Post("/shorten", http.HandlerFunc(h.ShortenFromJSON))

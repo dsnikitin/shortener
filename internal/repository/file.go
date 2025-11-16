@@ -13,30 +13,30 @@ import (
 
 const queueSize int = 1000
 
-type Repository struct {
+type FileStorage struct {
 	mu       sync.RWMutex
-	memory   map[string]string
+	cache    map[string]string
 	file     *os.File
 	queue    chan *models.URL
 	shutdown chan struct{}
 	wg       sync.WaitGroup
 }
 
-func New(filePath string) (*Repository, error) {
+func NewFileStorage(filePath string) (*FileStorage, error) {
 	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
 		return nil, err
 	}
 
-	r := &Repository{
+	r := &FileStorage{
 		mu:       sync.RWMutex{},
-		memory:   make(map[string]string),
+		cache:    make(map[string]string),
 		file:     file,
 		queue:    make(chan *models.URL, queueSize),
 		shutdown: make(chan struct{}),
 	}
 
-	if err := r.loadToMemory(); err != nil {
+	if err := r.loadToCache(); err != nil {
 		if closeErr := r.file.Close(); closeErr != nil {
 			logger.Log.Sugar().Errorw("failed to close file", "error", closeErr)
 		}
@@ -50,9 +50,15 @@ func New(filePath string) (*Repository, error) {
 	return r, nil
 }
 
-func (r *Repository) Save(url *models.URL) error {
+func (r *FileStorage) Save(url *models.URL) error {
 	r.mu.Lock()
-	r.memory[url.ID] = url.Original
+	_, ok := r.cache[url.ID]
+	if ok {
+		r.mu.Unlock()
+		return errors.New("id already exists")
+	}
+
+	r.cache[url.ID] = url.Original
 	r.mu.Unlock()
 
 	for {
@@ -60,23 +66,27 @@ func (r *Repository) Save(url *models.URL) error {
 		case r.queue <- url:
 			return nil
 		case <-r.shutdown:
-			return errors.New("repository closed")
+			return errors.New("file storage closed")
 		}
 	}
 }
 
-func (r *Repository) Get(id string) (*models.URL, error) {
+func (r *FileStorage) Get(id string) (*models.URL, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	if url, ok := r.memory[id]; ok {
+	if url, ok := r.cache[id]; ok {
 		return &models.URL{ID: id, Original: url}, nil
 	}
 
 	return nil, errors.New("id not found")
 }
 
-func (r *Repository) Close() {
+func (r *FileStorage) PingDB() error {
+	return errors.New("not a db storage")
+}
+
+func (r *FileStorage) Close() {
 	close(r.shutdown)
 	r.wg.Wait()
 
@@ -85,7 +95,7 @@ func (r *Repository) Close() {
 	}
 }
 
-func (r *Repository) loadToMemory() error {
+func (r *FileStorage) loadToCache() error {
 	scanner := bufio.NewScanner(r.file)
 
 	var urlEntry models.URL
@@ -94,13 +104,13 @@ func (r *Repository) loadToMemory() error {
 			return err
 		}
 
-		r.memory[urlEntry.ID] = urlEntry.Original
+		r.cache[urlEntry.ID] = urlEntry.Original
 	}
 
 	return scanner.Err()
 }
 
-func (r *Repository) saveToFile(url *models.URL) error {
+func (r *FileStorage) saveToFile(url *models.URL) error {
 	data, err := json.Marshal(url)
 	if err != nil {
 		return err
@@ -112,7 +122,7 @@ func (r *Repository) saveToFile(url *models.URL) error {
 	return err
 }
 
-func (r *Repository) asyncWriter() {
+func (r *FileStorage) asyncWriter() {
 	defer r.wg.Done()
 
 	for {

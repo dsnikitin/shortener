@@ -32,6 +32,11 @@ func (m *MockService) GetOriginal(id string) (string, error) {
 	return args.String(0), args.Error(1)
 }
 
+func (m *MockService) PingDB() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
 func TestHandler_Shorten(t *testing.T) {
 	type headers struct {
 		contentType string
@@ -312,6 +317,78 @@ func TestHandler_Redirect(t *testing.T) {
 			assert.Equal(t, test.want.headers.location, res.Header.Get("Location"))
 			assert.Equal(t, test.want.headers.contentType, res.Header.Get("Content-Type"))
 			assert.Equal(t, test.want.resBody, string(resBody))
+		})
+	}
+}
+
+func TestHandler_PingDB(t *testing.T) {
+	type want struct {
+		code        int
+		contentType string
+	}
+
+	conf := &config.Config{
+		ServerAddr:       "localhost:8080",
+		ShortURLBaseAddr: "http://localhost:8080",
+	}
+
+	s := new(MockService)
+	h := handler.New(conf, s)
+
+	r := chi.NewRouter()
+	r.Get("/ping", h.PingDB)
+
+	tests := []struct {
+		name             string
+		method           string
+		servicesMockCall func()
+		want             want
+	}{
+		{
+			name:   "positive",
+			method: http.MethodGet,
+			servicesMockCall: func() {
+				s.On("PingDB").Return(nil).Once()
+			},
+			want: want{
+				code:        http.StatusOK,
+				contentType: "text/plain",
+			},
+		},
+		{
+			name:             "wrong method",
+			method:           http.MethodPost,
+			servicesMockCall: func() {},
+			want: want{
+				code: http.StatusMethodNotAllowed,
+			},
+		},
+		{
+			name:   "negative",
+			method: http.MethodGet,
+			servicesMockCall: func() {
+				s.On("PingDB").Return(errors.New("some error")).Once()
+			},
+			want: want{
+				code:        http.StatusInternalServerError,
+				contentType: "text/plain; charset=utf-8",
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.servicesMockCall()
+
+			req := httptest.NewRequest(test.method, "/ping", nil)
+			recorder := httptest.NewRecorder()
+
+			r.ServeHTTP(recorder, req)
+			res := recorder.Result()
+			defer res.Body.Close()
+
+			assert.Equal(t, test.want.code, res.StatusCode)
+			assert.Equal(t, test.want.contentType, res.Header.Get("Content-Type"))
 		})
 	}
 }

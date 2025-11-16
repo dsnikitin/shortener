@@ -14,6 +14,7 @@ import (
 type Service interface {
 	CreateID(url string) (string, error)
 	GetOriginal(id string) (string, error)
+	PingDB() error
 }
 
 type Handler struct {
@@ -97,4 +98,14 @@ func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/plain")
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
+}
+
+func (h *Handler) PingDB(w http.ResponseWriter, r *http.Request) {
+	if err := h.s.PingDB(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusOK)
 }
