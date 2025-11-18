@@ -32,6 +32,6 @@ func shutdown(server *http.Server) {
 	if err := server.Shutdown(ctx); err != nil {
 		logger.Log.Sugar().Errorw("server shutdown failed", "error", err)
 	} else {
-		logger.Log.Sugar().Info("server shutdown completed")
+		logger.Log.Sugar().Infow("server shutdown completed")
 	}
 }

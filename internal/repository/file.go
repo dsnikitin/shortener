@@ -13,7 +13,7 @@ import (
 
 const queueSize int = 1000
 
-type FileStorage struct {
+type File struct {
 	mu       sync.RWMutex
 	cache    map[string]string
 	file     *os.File
@@ -22,13 +22,13 @@ type FileStorage struct {
 	wg       sync.WaitGroup
 }
 
-func NewFileStorage(filePath string) (*FileStorage, error) {
+func NewFile(filePath string) (*File, error) {
 	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
 		return nil, err
 	}
 
-	r := &FileStorage{
+	r := &File{
 		mu:       sync.RWMutex{},
 		cache:    make(map[string]string),
 		file:     file,
@@ -50,7 +50,7 @@ func NewFileStorage(filePath string) (*FileStorage, error) {
 	return r, nil
 }
 
-func (r *FileStorage) Save(url *models.URL) error {
+func (r *File) Save(url *models.URL) error {
 	r.mu.Lock()
 	_, ok := r.cache[url.ID]
 	if ok {
@@ -71,7 +71,7 @@ func (r *FileStorage) Save(url *models.URL) error {
 	}
 }
 
-func (r *FileStorage) Get(id string) (*models.URL, error) {
+func (r *File) Get(id string) (*models.URL, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -82,11 +82,11 @@ func (r *FileStorage) Get(id string) (*models.URL, error) {
 	return nil, errors.New("id not found")
 }
 
-func (r *FileStorage) PingDB() error {
+func (r *File) PingDB() error {
 	return errors.New("not a db storage")
 }
 
-func (r *FileStorage) Close() {
+func (r *File) Close() {
 	close(r.shutdown)
 	r.wg.Wait()
 
@@ -95,7 +95,7 @@ func (r *FileStorage) Close() {
 	}
 }
 
-func (r *FileStorage) loadToCache() error {
+func (r *File) loadToCache() error {
 	scanner := bufio.NewScanner(r.file)
 
 	var urlEntry models.URL
@@ -110,7 +110,7 @@ func (r *FileStorage) loadToCache() error {
 	return scanner.Err()
 }
 
-func (r *FileStorage) saveToFile(url *models.URL) error {
+func (r *File) saveToFile(url *models.URL) error {
 	data, err := json.Marshal(url)
 	if err != nil {
 		return err
@@ -122,7 +122,7 @@ func (r *FileStorage) saveToFile(url *models.URL) error {
 	return err
 }
 
-func (r *FileStorage) asyncWriter() {
+func (r *File) asyncWriter() {
 	defer r.wg.Done()
 
 	for {

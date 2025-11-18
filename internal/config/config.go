@@ -17,11 +17,13 @@ type Config struct {
 	ShortURLBaseAddr string `env:"BASE_URL"`
 	LogLevel         string `env:"LOG_LEVEL"`
 	FileStoragePath  string `env:"FILE_STORAGE_PATH"`
-	DataBase         db.Config
+	DataBase         *db.Config
 }
 
 func New() (*Config, error) {
-	c := &Config{}
+	c := &Config{
+		DataBase: &db.Config{},
+	}
 
 	flag.StringVar(&c.ServerAddr, "a", "localhost:8080", "server host:port")
 	flag.StringVar(&c.ShortURLBaseAddr, "b", "http://localhost:8080", "base short url")
@@ -34,7 +36,7 @@ func New() (*Config, error) {
 		return nil, err
 	}
 
-	if err := env.Parse(&c.DataBase); err != nil {
+	if err := env.Parse(c.DataBase); err != nil {
 		return nil, err
 	}
 

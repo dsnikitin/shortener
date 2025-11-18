@@ -7,19 +7,19 @@ import (
 	"github.com/dsnikitin/shortener/internal/models"
 )
 
-type MemoryStorage struct {
+type Memory struct {
 	mu      sync.RWMutex
 	storage map[string]string
 }
 
-func NewMemory() *MemoryStorage {
-	return &MemoryStorage{
+func NewMemory() *Memory {
+	return &Memory{
 		mu:      sync.RWMutex{},
 		storage: make(map[string]string),
 	}
 }
 
-func (r *MemoryStorage) Save(url *models.URL) error {
+func (r *Memory) Save(url *models.URL) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -31,7 +31,7 @@ func (r *MemoryStorage) Save(url *models.URL) error {
 	return nil
 }
 
-func (r *MemoryStorage) Get(id string) (*models.URL, error) {
+func (r *Memory) Get(id string) (*models.URL, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -42,8 +42,8 @@ func (r *MemoryStorage) Get(id string) (*models.URL, error) {
 	return nil, errors.New("id not found")
 }
 
-func (r *MemoryStorage) PingDB() error {
+func (r *Memory) PingDB() error {
 	return errors.New("not a db storage")
 }
 
-func (r *MemoryStorage) Close() {}
+func (r *Memory) Close() {}

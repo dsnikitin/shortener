@@ -2,33 +2,41 @@ package repository
 
 import (
 	"database/sql"
-	"errors"
 
 	"github.com/dsnikitin/shortener/internal/logger"
 	"github.com/dsnikitin/shortener/internal/models"
 )
 
-type PostgresStorage struct {
+type Postgres struct {
 	db *sql.DB
 }
 
-func NewPostgres(db *sql.DB) *PostgresStorage {
-	return &PostgresStorage{db: db}
+func NewPostgres(db *sql.DB) *Postgres {
+	return &Postgres{db: db}
 }
 
-func (r *PostgresStorage) PingDB() error {
+func (r *Postgres) PingDB() error {
 	return r.db.Ping()
 }
 
-func (r *PostgresStorage) Get(id string) (*models.URL, error) {
-	return nil, errors.New("not implemented")
+const getSQL = `SELECT id, original FROM shortener.urls WHERE id = $1`
+
+func (r *Postgres) Get(id string) (*models.URL, error) {
+	row := r.db.QueryRow(getSQL, id)
+
+	var url models.URL
+	err := row.Scan(&url.ID, &url.Original)
+	return &url, err
 }
 
-func (r *PostgresStorage) Save(url *models.URL) error {
-	return errors.New("not implemented")
+const saveSQL = `INSERT INTO shortener.urls (id, original) VALUES ($1, $2)`
+
+func (r *Postgres) Save(url *models.URL) error {
+	_, err := r.db.Exec(saveSQL, url.ID, url.Original)
+	return err
 }
 
-func (r *PostgresStorage) Close() {
+func (r *Postgres) Close() {
 	if err := r.db.Close(); err != nil {
 		logger.Log.Sugar().Errorw("failed to close db", "error", err)
 	}
