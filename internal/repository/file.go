@@ -7,6 +7,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/dsnikitin/shortener/internal/errx"
 	"github.com/dsnikitin/shortener/internal/logger"
 	"github.com/dsnikitin/shortener/internal/models"
 )
@@ -17,7 +18,7 @@ type File struct {
 	mu       sync.RWMutex
 	cache    map[string]string
 	file     *os.File
-	queue    chan *models.URL
+	queue    chan models.URL
 	shutdown chan struct{}
 	wg       sync.WaitGroup
 }
@@ -32,7 +33,7 @@ func NewFile(filePath string) (*File, error) {
 		mu:       sync.RWMutex{},
 		cache:    make(map[string]string),
 		file:     file,
-		queue:    make(chan *models.URL, queueSize),
+		queue:    make(chan models.URL, queueSize),
 		shutdown: make(chan struct{}),
 	}
 
@@ -50,11 +51,11 @@ func NewFile(filePath string) (*File, error) {
 	return r, nil
 }
 
-func (r *File) Save(url *models.URL) error {
+func (r *File) Save(url models.URL) error {
 	r.mu.Lock()
 	if _, ok := r.cache[url.ID]; ok {
 		r.mu.Unlock()
-		return errors.New("id already exists")
+		return errx.NewAlreadyExistsError(url, errors.New("already exists"))
 	}
 
 	r.cache[url.ID] = url.Original
@@ -76,7 +77,7 @@ func (r *File) SaveMany(urls []models.URL) error {
 	for i := range urls {
 		if _, ok := r.cache[urls[i].ID]; ok {
 			r.mu.Unlock()
-			return errors.New("id already exists")
+			return errx.NewAlreadyExistsError(urls[i], errors.New("already exists"))
 		}
 	}
 
@@ -88,7 +89,7 @@ func (r *File) SaveMany(urls []models.URL) error {
 	for i := range urls {
 		for {
 			select {
-			case r.queue <- &urls[i]:
+			case r.queue <- urls[i]:
 				continue
 			case <-r.shutdown:
 				return errors.New("file storage closed")
@@ -99,15 +100,15 @@ func (r *File) SaveMany(urls []models.URL) error {
 	return nil
 }
 
-func (r *File) Get(id string) (*models.URL, error) {
+func (r *File) Get(id string) (models.URL, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	if url, ok := r.cache[id]; ok {
-		return &models.URL{ID: id, Original: url}, nil
+		return models.URL{ID: id, Original: url}, nil
 	}
 
-	return nil, errors.New("id not found")
+	return models.URL{}, errx.ErrNotFound
 }
 
 func (r *File) PingDB() error {
@@ -138,7 +139,7 @@ func (r *File) loadToCache() error {
 	return scanner.Err()
 }
 
-func (r *File) saveToFile(url *models.URL) error {
+func (r *File) saveToFile(url models.URL) error {
 	data, err := json.Marshal(url)
 	if err != nil {
 		return err
