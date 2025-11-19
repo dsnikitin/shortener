@@ -2,13 +2,10 @@ package handler
 
 import (
 	"encoding/json"
-	"errors"
-	"fmt"
 	"io"
 	"net/http"
 
 	"github.com/dsnikitin/shortener/internal/config"
-	"github.com/dsnikitin/shortener/internal/errx"
 	"github.com/dsnikitin/shortener/internal/logger"
 	"github.com/dsnikitin/shortener/internal/models"
 	"github.com/go-chi/chi/v5"
@@ -16,7 +13,7 @@ import (
 
 type Service interface {
 	CreateID(url string) (string, error)
-	CreateIDs(req map[string]string) (map[string]string, error)
+	CreateIDs(req []models.ShortenBatchRequest) (map[string]string, error)
 	GetOriginal(id string) (string, error)
 	PingDB() error
 }
@@ -46,23 +43,15 @@ func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/plain")
-	status := http.StatusCreated
-
 	id, err := h.s.CreateID(string(bodyBytes))
 	if err != nil {
-		var aeErr *errx.ErrAlreadyExists
-		if !errors.As(err, &aeErr) {
-			logger.Log.Sugar().Errorw("failed to create id", "error", err.Error())
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-			return
-		}
-
-		status = http.StatusConflict
-		id = aeErr.URL.ID
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
-	w.WriteHeader(status)
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusCreated)
+
 	io.WriteString(w, h.conf.ShortURLBaseAddr+"/"+id)
 }
 
@@ -79,23 +68,14 @@ func (h *Handler) ShortenFromJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	status := http.StatusCreated
-
 	id, err := h.s.CreateID(req.URL)
 	if err != nil {
-		var aeErr *errx.ErrAlreadyExists
-		if !errors.As(err, &aeErr) {
-			logger.Log.Sugar().Errorw("failed to create id", "error", err.Error())
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-			return
-		}
-
-		status = http.StatusConflict
-		id = aeErr.URL.ID
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
-	w.WriteHeader(status)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
 
 	resp := models.ShortenResponse{Result: h.conf.ShortURLBaseAddr + "/" + id}
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
@@ -113,43 +93,36 @@ func (h *Handler) ShortenBatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(req) == 0 {
-		http.Error(w, "empty request", http.StatusBadRequest)
+		http.Error(w, "empty body", http.StatusBadRequest)
 		return
 	}
 
-	originalURLs := make(map[string]string)
-	for i := range req {
-		if _, ok := originalURLs[req[i].CorrelationID]; ok {
-			http.Error(w, fmt.Sprintf("duplicate correlationID %s", req[i].CorrelationID), http.StatusBadRequest)
-			return
-		}
-
-		originalURLs[req[i].CorrelationID] = req[i].OriginalURL
-	}
-
-	ids, err := h.s.CreateIDs(originalURLs)
+	ids, err := h.s.CreateIDs(req)
 	if err != nil {
-		var aeErr *errx.ErrAlreadyExists
-		if !errors.As(err, &aeErr) {
-			logger.Log.Sugar().Errorw("failed to create ids", "error", err.Error())
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-			return
-		}
-
-		resp := []models.ShortenBatchResponse{{
-			CorrelationID: aeErr.CorrelationID,
-			ShortURL:      h.conf.ShortURLBaseAddr + "/" + aeErr.URL.ID,
-		}}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusConflict)
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			logger.Log.Sugar().Errorw("encoding shorten batch response", "error", err)
-		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	h.sendBatchResponse(w, req, ids)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+
+	resp := make([]models.ShortenBatchResponse, 0, len(req))
+	for i := range req {
+		id, ok := ids[req[i].CorrelationID]
+		if !ok {
+			http.Error(w, "result not exists", http.StatusInternalServerError)
+			return
+		}
+		resp = append(resp, models.ShortenBatchResponse{
+			CorrelationID: req[i].CorrelationID,
+			ShortURL:      h.conf.ShortURLBaseAddr + "/" + id,
+		})
+	}
+
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		logger.Log.Sugar().Errorw("encoding shorten batch response", "error", err)
+		return
+	}
 }
 
 func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request) {
@@ -161,13 +134,7 @@ func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request) {
 
 	url, err := h.s.GetOriginal(id)
 	if err != nil {
-		if !errors.Is(err, err) {
-			logger.Log.Sugar().Errorw("failed to get original url", "error", err.Error())
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-			return
-		}
-
-		http.Error(w, err.Error(), http.StatusNotFound)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -183,30 +150,4 @@ func (h *Handler) PingDB(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusOK)
-}
-
-func (h *Handler) sendBatchResponse(
-	w http.ResponseWriter, req []models.ShortenBatchRequest, ids map[string]string,
-) {
-	resp := make([]models.ShortenBatchResponse, 0, len(req))
-	for i := range req {
-		id, ok := ids[req[i].CorrelationID]
-		if !ok {
-			logger.Log.Sugar().Errorw("missing result", "correlationID", req[i].CorrelationID)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-			return
-		}
-
-		resp = append(resp, models.ShortenBatchResponse{
-			CorrelationID: req[i].CorrelationID,
-			ShortURL:      h.conf.ShortURLBaseAddr + "/" + id,
-		})
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		logger.Log.Sugar().Errorw("encoding shorten batch response", "error", err)
-		return
-	}
 }
