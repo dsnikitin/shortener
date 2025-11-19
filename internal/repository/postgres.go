@@ -36,6 +36,22 @@ func (r *Postgres) Save(url *models.URL) error {
 	return err
 }
 
+func (r *Postgres) SaveMany(urls []models.URL) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+
+	for _, url := range urls {
+		if _, err := r.db.Exec(saveSQL, url.ID, url.Original); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
 func (r *Postgres) Close() {
 	if err := r.db.Close(); err != nil {
 		logger.Log.Sugar().Errorw("failed to close db", "error", err)

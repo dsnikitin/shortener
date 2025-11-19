@@ -11,6 +11,7 @@ import (
 
 type Repository interface {
 	Save(url *models.URL) error
+	SaveMany(urls []models.URL) error
 	Get(id string) (*models.URL, error)
 	PingDB() error
 	Close()
@@ -35,6 +36,28 @@ func (s *Service) CreateID(original string) (string, error) {
 	}
 
 	return url.ID, nil
+}
+
+func (s *Service) CreateIDs(reqs []models.ShortenBatchRequest) (map[string]string, error) {
+	res := make(map[string]string, len(reqs))
+	urls := make([]models.URL, 0, len(reqs))
+
+	for _, req := range reqs {
+		id := generateID(req.OriginalURL)
+
+		res[req.CorrelationID] = id
+
+		urls = append(urls, models.URL{
+			ID:       id,
+			Original: req.OriginalURL,
+		})
+	}
+
+	if err := s.r.SaveMany(urls); err != nil {
+		return nil, err
+	}
+
+	return res, nil
 }
 
 func (s *Service) GetOriginal(id string) (string, error) {

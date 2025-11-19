@@ -64,8 +64,7 @@ func initRepository(cfg *config.Config, db *sql.DB) (service.Repository, error) 
 	case db != nil:
 		return repository.NewPostgres(db), nil
 	case cfg.FileStoragePath != "":
-		r, err := repository.NewFile(cfg.FileStoragePath)
-		return r, err
+		return repository.NewFile(cfg.FileStoragePath)
 	default:
 		return repository.NewMemory(), nil
 	}

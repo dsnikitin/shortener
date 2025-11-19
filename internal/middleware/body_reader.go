@@ -2,14 +2,14 @@ package middleware
 
 import (
 	"net/http"
-
-	"github.com/dsnikitin/shortener/internal/config"
 )
 
-func BodyMaxBytesReader(h http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, config.OriginalURLMaxLength)
+func BodyMaxBytesReader(maxSize int64) func(h http.Handler) http.Handler {
+	return func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Body = http.MaxBytesReader(w, r.Body, maxSize)
 
-		h.ServeHTTP(w, r)
-	})
+			h.ServeHTTP(w, r)
+		})
+	}
 }

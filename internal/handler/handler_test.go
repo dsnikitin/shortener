@@ -27,6 +27,11 @@ func (m *MockService) CreateID(url string) (string, error) {
 	return args.String(0), args.Error(1)
 }
 
+func (m *MockService) CreateIDs(reqs []models.ShortenBatchRequest) (map[string]string, error) {
+	args := m.Called(reqs)
+	return args.Get(0).(map[string]string), args.Error(1)
+}
+
 func (m *MockService) GetOriginal(id string) (string, error) {
 	args := m.Called(id)
 	return args.String(0), args.Error(1)

@@ -13,6 +13,7 @@ import (
 
 type Service interface {
 	CreateID(url string) (string, error)
+	CreateIDs(req []models.ShortenBatchRequest) (map[string]string, error)
 	GetOriginal(id string) (string, error)
 	PingDB() error
 }
@@ -79,6 +80,47 @@ func (h *Handler) ShortenFromJSON(w http.ResponseWriter, r *http.Request) {
 	resp := models.ShortenResponse{Result: h.conf.ShortURLBaseAddr + "/" + id}
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		logger.Log.Sugar().Errorw("encoding shorten response", "error", err)
+		return
+	}
+}
+
+func (h *Handler) ShortenBatch(w http.ResponseWriter, r *http.Request) {
+	var req []models.ShortenBatchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logger.Log.Sugar().Errorw("cannot read shorten batch request", "error", err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if len(req) == 0 {
+		http.Error(w, "empty body", http.StatusBadRequest)
+		return
+	}
+
+	ids, err := h.s.CreateIDs(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+
+	resp := make([]models.ShortenBatchResponse, 0, len(req))
+	for i := range req {
+		id, ok := ids[req[i].CorrelationID]
+		if !ok {
+			http.Error(w, "result not exists", http.StatusInternalServerError)
+			return
+		}
+		resp = append(resp, models.ShortenBatchResponse{
+			CorrelationID: req[i].CorrelationID,
+			ShortURL:      h.conf.ShortURLBaseAddr + "/" + id,
+		})
+	}
+
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		logger.Log.Sugar().Errorw("encoding shorten batch response", "error", err)
 		return
 	}
 }

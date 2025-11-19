@@ -52,8 +52,7 @@ func NewFile(filePath string) (*File, error) {
 
 func (r *File) Save(url *models.URL) error {
 	r.mu.Lock()
-	_, ok := r.cache[url.ID]
-	if ok {
+	if _, ok := r.cache[url.ID]; ok {
 		r.mu.Unlock()
 		return errors.New("id already exists")
 	}
@@ -69,6 +68,35 @@ func (r *File) Save(url *models.URL) error {
 			return errors.New("file storage closed")
 		}
 	}
+}
+
+func (r *File) SaveMany(urls []models.URL) error {
+	r.mu.Lock()
+
+	for i := range urls {
+		if _, ok := r.cache[urls[i].ID]; ok {
+			r.mu.Unlock()
+			return errors.New("id already exists")
+		}
+	}
+
+	for i := range urls {
+		r.cache[urls[i].ID] = urls[i].Original
+	}
+	r.mu.Unlock()
+
+	for i := range urls {
+		for {
+			select {
+			case r.queue <- &urls[i]:
+				continue
+			case <-r.shutdown:
+				return errors.New("file storage closed")
+			}
+		}
+	}
+
+	return nil
 }
 
 func (r *File) Get(id string) (*models.URL, error) {

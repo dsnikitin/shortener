@@ -31,6 +31,23 @@ func (r *Memory) Save(url *models.URL) error {
 	return nil
 }
 
+func (r *Memory) SaveMany(urls []models.URL) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for i := range urls {
+		if _, ok := r.storage[urls[i].ID]; ok {
+			return errors.New("id already exists")
+		}
+	}
+
+	for i := range urls {
+		r.storage[urls[i].ID] = urls[i].Original
+	}
+
+	return nil
+}
+
 func (r *Memory) Get(id string) (*models.URL, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

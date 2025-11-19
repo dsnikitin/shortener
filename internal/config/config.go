@@ -8,8 +8,9 @@ import (
 )
 
 const (
-	IDMaxLength          int   = 8
-	OriginalURLMaxLength int64 = 2048
+	IDMaxLength                int   = 8
+	OriginalURLMaxLength       int64 = 2048
+	MaxOriginalURLCountInBatch int64 = 500
 )
 
 type Config struct {
