@@ -2,7 +2,10 @@ package repository
 
 import (
 	"database/sql"
+	"errors"
+	"fmt"
 
+	"github.com/dsnikitin/shortener/internal/errx"
 	"github.com/dsnikitin/shortener/internal/logger"
 	"github.com/dsnikitin/shortener/internal/models"
 )
@@ -19,21 +22,42 @@ func (r *Postgres) PingDB() error {
 	return r.db.Ping()
 }
 
-const getSQL = `SELECT id, original FROM shortener.urls WHERE id = $1`
+const getSQL = `
+	SELECT id, original
+	FROM shortener.urls
+	WHERE id = $1
+`
 
-func (r *Postgres) Get(id string) (*models.URL, error) {
+func (r *Postgres) Get(id string) (models.URL, error) {
 	row := r.db.QueryRow(getSQL, id)
 
 	var url models.URL
 	err := row.Scan(&url.ID, &url.Original)
-	return &url, err
+	return url, err
 }
 
-const saveSQL = `INSERT INTO shortener.urls (id, original) VALUES ($1, $2)`
+const saveSQL = `
+	INSERT INTO shortener.urls (id, original)
+	VALUES ($1, $2)
+	ON CONFLICT DO NOTHING
+`
 
-func (r *Postgres) Save(url *models.URL) error {
-	_, err := r.db.Exec(saveSQL, url.ID, url.Original)
-	return err
+func (r *Postgres) Save(url models.URL) error {
+	res, err := r.db.Exec(saveSQL, url.ID, url.Original)
+	if err != nil {
+		return fmt.Errorf("exec: %w", err)
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return errx.NewAlreadyExistsError(url, errors.New("already exists"))
+	}
+
+	return nil
 }
 
 func (r *Postgres) SaveMany(urls []models.URL) error {
@@ -43,9 +67,21 @@ func (r *Postgres) SaveMany(urls []models.URL) error {
 	}
 
 	for _, url := range urls {
-		if _, err := r.db.Exec(saveSQL, url.ID, url.Original); err != nil {
+		res, err := r.db.Exec(saveSQL, url.ID, url.Original)
+		if err != nil {
 			tx.Rollback()
-			return err
+			return fmt.Errorf("exec: %w", err)
+		}
+
+		rowsAffected, err := res.RowsAffected()
+		if err != nil {
+			tx.Rollback()
+			return fmt.Errorf("rows affected: %w", err)
+		}
+
+		if rowsAffected == 0 {
+			tx.Rollback()
+			return errx.NewAlreadyExistsError(url, errors.New("already exists"))
 		}
 	}
 

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/dsnikitin/shortener/internal/errx"
 	"github.com/dsnikitin/shortener/internal/models"
 )
 
@@ -19,12 +20,12 @@ func NewMemory() *Memory {
 	}
 }
 
-func (r *Memory) Save(url *models.URL) error {
+func (r *Memory) Save(url models.URL) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if _, ok := r.storage[url.ID]; ok {
-		return errors.New("id already exists")
+		return errx.NewAlreadyExistsError(url, errors.New("already exists"))
 	}
 
 	r.storage[url.ID] = url.Original
@@ -37,7 +38,7 @@ func (r *Memory) SaveMany(urls []models.URL) error {
 
 	for i := range urls {
 		if _, ok := r.storage[urls[i].ID]; ok {
-			return errors.New("id already exists")
+			return errx.NewAlreadyExistsError(urls[i], errors.New("already exists"))
 		}
 	}
 
@@ -48,15 +49,15 @@ func (r *Memory) SaveMany(urls []models.URL) error {
 	return nil
 }
 
-func (r *Memory) Get(id string) (*models.URL, error) {
+func (r *Memory) Get(id string) (models.URL, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	if url, ok := r.storage[id]; ok {
-		return &models.URL{ID: id, Original: url}, nil
+		return models.URL{ID: id, Original: url}, nil
 	}
 
-	return nil, errors.New("id not found")
+	return models.URL{}, errx.ErrNotFound
 }
 
 func (r *Memory) PingDB() error {

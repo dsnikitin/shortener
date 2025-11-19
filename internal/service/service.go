@@ -3,16 +3,19 @@ package service
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/dsnikitin/shortener/internal/config"
+	"github.com/dsnikitin/shortener/internal/errx"
 	"github.com/dsnikitin/shortener/internal/models"
 )
 
 type Repository interface {
-	Save(url *models.URL) error
+	Save(url models.URL) error
 	SaveMany(urls []models.URL) error
-	Get(id string) (*models.URL, error)
+	Get(id string) (models.URL, error)
 	PingDB() error
 	Close()
 }
@@ -26,38 +29,65 @@ func New(r Repository) *Service {
 }
 
 func (s *Service) CreateID(original string) (string, error) {
-	url := &models.URL{
+	url := models.URL{
 		ID:       generateID(original),
 		Original: original,
 	}
 
 	if err := s.r.Save(url); err != nil {
-		return "", err
+		var aeErr *errx.ErrAlreadyExists
+		if errors.As(err, &aeErr) {
+			if url.Original != aeErr.URL.Original {
+				return "", fmt.Errorf("collision detected - common id %s for requested url %s and existing url %s",
+					aeErr.URL.ID, url.Original, aeErr.URL)
+			}
+		}
+
+		return "", fmt.Errorf("save: %w", err)
 	}
 
 	return url.ID, nil
 }
 
-func (s *Service) CreateIDs(reqs []models.ShortenBatchRequest) (map[string]string, error) {
-	res := make(map[string]string, len(reqs))
-	urls := make([]models.URL, 0, len(reqs))
+func (s *Service) CreateIDs(req map[string]string) (map[string]string, error) {
+	result := make(map[string]string, len(req))
+	urls := make([]models.URL, 0, len(req))
 
-	for _, req := range reqs {
-		id := generateID(req.OriginalURL)
+	for correlationID, originalURL := range req {
+		id := generateID(originalURL)
 
-		res[req.CorrelationID] = id
+		result[correlationID] = id
 
 		urls = append(urls, models.URL{
 			ID:       id,
-			Original: req.OriginalURL,
+			Original: originalURL,
 		})
 	}
 
 	if err := s.r.SaveMany(urls); err != nil {
-		return nil, err
+		var aeErr *errx.ErrAlreadyExists
+		if errors.As(err, &aeErr) {
+			for correlationID, id := range result {
+				originalURL := req[correlationID]
+
+				if originalURL == aeErr.URL.Original {
+					aeErr.CorrelationID = correlationID
+					return nil, fmt.Errorf("save: %w", err)
+				}
+
+				if id == aeErr.URL.ID {
+					return nil, fmt.Errorf("collision detected - common id %s for requested url %s and existing url %s",
+						id, originalURL, aeErr.URL)
+				}
+
+			}
+
+		}
+
+		return nil, fmt.Errorf("save: %w", err)
 	}
 
-	return res, nil
+	return result, nil
 }
 
 func (s *Service) GetOriginal(id string) (string, error) {
