@@ -1,0 +1,6 @@
+CREATE SCHEMA IF NOT EXISTS shortener;
+
+CREATE TABLE IF NOT EXISTS shortener.urls (
+	id VARCHAR(8) PRIMARY KEY,
+	original TEXT NOT NULL
+);

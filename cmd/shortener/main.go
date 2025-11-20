@@ -1,37 +1,52 @@
 package main
 
 import (
+	"database/sql"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/dsnikitin/shortener/internal/config"
+	"github.com/dsnikitin/shortener/internal/config/db"
 	"github.com/dsnikitin/shortener/internal/handler"
 	"github.com/dsnikitin/shortener/internal/logger"
 	"github.com/dsnikitin/shortener/internal/repository"
 	"github.com/dsnikitin/shortener/internal/service"
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/pgx"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func main() {
-	conf, err := config.New()
+	cfg, err := config.New()
 	if err != nil {
 		log.Fatalf("config init error: %s", err)
 	}
 
-	if err := logger.Initialize(conf.LogLevel); err != nil {
+	if err := logger.Initialize(cfg.LogLevel); err != nil {
 		log.Fatalf("logger init error: %s", err)
 	}
 
-	repo, err := repository.New(conf.FileStoragePath)
+	dbHandle, err := db.New(cfg.DataBase)
+	if err != nil {
+		logger.Log.Sugar().Infow("running without connection to database", "cause", err)
+	} else {
+		if err := runMigrations(cfg.DataBase); err != nil {
+			logger.Log.Sugar().Fatalw("failed to run migrations", "error", err)
+		}
+	}
+
+	r, err := initRepository(cfg, dbHandle)
 	if err != nil {
 		logger.Log.Sugar().Fatalw("failed to init repository", "error", err)
 	}
-	defer repo.Close()
+	defer r.Close()
 
-	service := service.New(repo)
-	handler := handler.New(conf, service)
-	server := initServer(conf, newChiMux(handler))
+	s := service.New(r)
+	h := handler.New(cfg, s)
+	server := initServer(cfg, newChiMux(h))
 
 	shutdownSignal := make(chan os.Signal, 1)
 	signal.Notify(shutdownSignal, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
@@ -40,6 +55,43 @@ func main() {
 
 	<-shutdownSignal
 
-	logger.Log.Sugar().Info("received shutdown signal")
+	logger.Log.Sugar().Infow("received shutdown signal")
 	shutdown(server)
+}
+
+func initRepository(cfg *config.Config, db *sql.DB) (service.Repository, error) {
+	switch {
+	case db != nil:
+		return repository.NewPostgres(db), nil
+	case cfg.FileStoragePath != "":
+		return repository.NewFile(cfg.FileStoragePath)
+	default:
+		return repository.NewMemory(), nil
+	}
+}
+
+func runMigrations(cfg *db.Config) error {
+	db, err := sql.Open("pgx", cfg.DSN)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	driver, err := pgx.WithInstance(db, &pgx.Config{})
+	if err != nil {
+		return err
+	}
+
+	m, err := migrate.NewWithDatabaseInstance("file://migrations", "pgx", driver)
+	if err != nil {
+		return err
+	}
+	defer m.Close()
+
+	if err = m.Up(); err != nil && err != migrate.ErrNoChange {
+		return err
+	}
+
+	logger.Log.Sugar().Info("db migrations applied")
+	return nil
 }

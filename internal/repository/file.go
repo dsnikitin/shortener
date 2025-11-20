@@ -7,36 +7,37 @@ import (
 	"os"
 	"sync"
 
+	"github.com/dsnikitin/shortener/internal/errx"
 	"github.com/dsnikitin/shortener/internal/logger"
 	"github.com/dsnikitin/shortener/internal/models"
 )
 
 const queueSize int = 1000
 
-type Repository struct {
+type File struct {
 	mu       sync.RWMutex
-	memory   map[string]string
+	cache    map[string]string
 	file     *os.File
-	queue    chan *models.URL
+	queue    chan models.URL
 	shutdown chan struct{}
 	wg       sync.WaitGroup
 }
 
-func New(filePath string) (*Repository, error) {
+func NewFile(filePath string) (*File, error) {
 	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
 		return nil, err
 	}
 
-	r := &Repository{
+	r := &File{
 		mu:       sync.RWMutex{},
-		memory:   make(map[string]string),
+		cache:    make(map[string]string),
 		file:     file,
-		queue:    make(chan *models.URL, queueSize),
+		queue:    make(chan models.URL, queueSize),
 		shutdown: make(chan struct{}),
 	}
 
-	if err := r.loadToMemory(); err != nil {
+	if err := r.loadToCache(); err != nil {
 		if closeErr := r.file.Close(); closeErr != nil {
 			logger.Log.Sugar().Errorw("failed to close file", "error", closeErr)
 		}
@@ -50,9 +51,14 @@ func New(filePath string) (*Repository, error) {
 	return r, nil
 }
 
-func (r *Repository) Save(url *models.URL) error {
+func (r *File) Save(url models.URL) error {
 	r.mu.Lock()
-	r.memory[url.ID] = url.Original
+	if _, ok := r.cache[url.ID]; ok {
+		r.mu.Unlock()
+		return errx.NewAlreadyExistsError(url, errors.New("already exists"))
+	}
+
+	r.cache[url.ID] = url.Original
 	r.mu.Unlock()
 
 	for {
@@ -60,23 +66,56 @@ func (r *Repository) Save(url *models.URL) error {
 		case r.queue <- url:
 			return nil
 		case <-r.shutdown:
-			return errors.New("repository closed")
+			return errors.New("file storage closed")
 		}
 	}
 }
 
-func (r *Repository) Get(id string) (*models.URL, error) {
+func (r *File) SaveMany(urls []models.URL) error {
+	r.mu.Lock()
+
+	for i := range urls {
+		if _, ok := r.cache[urls[i].ID]; ok {
+			r.mu.Unlock()
+			return errx.NewAlreadyExistsError(urls[i], errors.New("already exists"))
+		}
+	}
+
+	for i := range urls {
+		r.cache[urls[i].ID] = urls[i].Original
+	}
+	r.mu.Unlock()
+
+	for i := range urls {
+		for {
+			select {
+			case r.queue <- urls[i]:
+				continue
+			case <-r.shutdown:
+				return errors.New("file storage closed")
+			}
+		}
+	}
+
+	return nil
+}
+
+func (r *File) Get(id string) (models.URL, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	if url, ok := r.memory[id]; ok {
-		return &models.URL{ID: id, Original: url}, nil
+	if url, ok := r.cache[id]; ok {
+		return models.URL{ID: id, Original: url}, nil
 	}
 
-	return nil, errors.New("id not found")
+	return models.URL{}, errx.ErrNotFound
 }
 
-func (r *Repository) Close() {
+func (r *File) PingDB() error {
+	return errors.New("not a db storage")
+}
+
+func (r *File) Close() {
 	close(r.shutdown)
 	r.wg.Wait()
 
@@ -85,7 +124,7 @@ func (r *Repository) Close() {
 	}
 }
 
-func (r *Repository) loadToMemory() error {
+func (r *File) loadToCache() error {
 	scanner := bufio.NewScanner(r.file)
 
 	var urlEntry models.URL
@@ -94,13 +133,13 @@ func (r *Repository) loadToMemory() error {
 			return err
 		}
 
-		r.memory[urlEntry.ID] = urlEntry.Original
+		r.cache[urlEntry.ID] = urlEntry.Original
 	}
 
 	return scanner.Err()
 }
 
-func (r *Repository) saveToFile(url *models.URL) error {
+func (r *File) saveToFile(url models.URL) error {
 	data, err := json.Marshal(url)
 	if err != nil {
 		return err
@@ -112,7 +151,7 @@ func (r *Repository) saveToFile(url *models.URL) error {
 	return err
 }
 
-func (r *Repository) asyncWriter() {
+func (r *File) asyncWriter() {
 	defer r.wg.Done()
 
 	for {
