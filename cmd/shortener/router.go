@@ -9,21 +9,23 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-func newChiMux(h *handler.Handler) *chi.Mux {
-	maxBodySize := config.OriginalURLMaxLength
-	maxBatchBodySize := config.OriginalURLMaxLength * config.MaxOriginalURLCountInBatch
-
+func initChiRouter(cfg *config.Config, h *handler.Handler) *chi.Mux {
 	r := chi.NewRouter()
+	r.Use(middleware.Auth(cfg.JWTSigningKey))
 	r.Use(middleware.Logging)
 	r.Use(middleware.GzipCompress)
 
-	r.With(middleware.BodyMaxBytesReader(maxBodySize)).Post("/", http.HandlerFunc(h.Shorten))
+	r.With(middleware.BodyMaxBytesReader(config.OriginalURLMaxLength)).
+		Post("/", http.HandlerFunc(h.Shorten))
 	r.Get("/{id}", http.HandlerFunc(h.Redirect))
 	r.Get("/ping", http.HandlerFunc(h.PingDB))
 
 	r.Route("/api", func(r chi.Router) {
-		r.With(middleware.BodyMaxBytesReader(maxBodySize)).Post("/shorten", http.HandlerFunc(h.ShortenFromJSON))
-		r.With(middleware.BodyMaxBytesReader(maxBatchBodySize)).Post("/shorten/batch", http.HandlerFunc(h.ShortenBatch))
+		r.With(middleware.BodyMaxBytesReader(config.OriginalURLMaxLength)).
+			Post("/shorten", http.HandlerFunc(h.ShortenFromJSON))
+		r.With(middleware.BodyMaxBytesReader(config.OriginalURLMaxBatchLength)).
+			Post("/shorten/batch", http.HandlerFunc(h.ShortenBatch))
+		r.Get("/user/urls", http.HandlerFunc(h.GetUserUrls))
 	})
 
 	return r

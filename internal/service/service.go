@@ -10,14 +10,16 @@ import (
 	"github.com/dsnikitin/shortener/internal/config"
 	"github.com/dsnikitin/shortener/internal/errx"
 	"github.com/dsnikitin/shortener/internal/models"
+	"github.com/google/uuid"
 )
 
 type Repository interface {
-	Save(url models.URL) error
-	SaveMany(urls []models.URL) error
-	Get(id string) (models.URL, error)
 	PingDB() error
-	Close()
+	Save(userID uuid.UUID, url models.URL) error
+	SaveMany(userID uuid.UUID, urls []models.URL) error
+	GetURL(id string) (models.URL, error)
+	GetUserURLs(userID uuid.UUID) ([]models.URL, error)
+	Close() error
 }
 
 type Service struct {
@@ -28,13 +30,13 @@ func New(r Repository) *Service {
 	return &Service{r: r}
 }
 
-func (s *Service) CreateID(original string) (string, error) {
+func (s *Service) CreateID(userID uuid.UUID, originalURL string) (string, error) {
 	url := models.URL{
-		ID:       generateID(original),
-		Original: original,
+		ID:       generateID(originalURL),
+		Original: originalURL,
 	}
 
-	if err := s.r.Save(url); err != nil {
+	if err := s.r.Save(userID, url); err != nil {
 		var aeErr *errx.ErrAlreadyExists
 		if errors.As(err, &aeErr) {
 			if url.Original != aeErr.URL.Original {
@@ -49,7 +51,7 @@ func (s *Service) CreateID(original string) (string, error) {
 	return url.ID, nil
 }
 
-func (s *Service) CreateIDs(req map[string]string) (map[string]string, error) {
+func (s *Service) CreateIDs(userID uuid.UUID, req map[string]string) (map[string]string, error) {
 	result := make(map[string]string, len(req))
 	urls := make([]models.URL, 0, len(req))
 
@@ -64,7 +66,7 @@ func (s *Service) CreateIDs(req map[string]string) (map[string]string, error) {
 		})
 	}
 
-	if err := s.r.SaveMany(urls); err != nil {
+	if err := s.r.SaveMany(userID, urls); err != nil {
 		var aeErr *errx.ErrAlreadyExists
 		if errors.As(err, &aeErr) {
 			for correlationID, id := range result {
@@ -91,7 +93,7 @@ func (s *Service) CreateIDs(req map[string]string) (map[string]string, error) {
 }
 
 func (s *Service) GetOriginal(id string) (string, error) {
-	url, err := s.r.Get(id)
+	url, err := s.r.GetURL(id)
 	if err != nil {
 		return "", err
 	}
@@ -101,6 +103,10 @@ func (s *Service) GetOriginal(id string) (string, error) {
 
 func (s *Service) PingDB() error {
 	return s.r.PingDB()
+}
+
+func (s *Service) GetUserURLs(userID uuid.UUID) ([]models.URL, error) {
+	return s.r.GetUserURLs(userID)
 }
 
 func generateID(url string) string {

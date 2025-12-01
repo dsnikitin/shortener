@@ -1,0 +1,97 @@
+package middleware
+
+import (
+	"errors"
+	"fmt"
+	"net/http"
+
+	"github.com/dsnikitin/shortener/internal/logger"
+	"github.com/golang-jwt/jwt/v4"
+	"github.com/google/uuid"
+)
+
+const authCookieName = "auth_token"
+
+type Claims struct {
+	jwt.RegisteredClaims
+	UserID uuid.UUID
+}
+
+func Auth(JWTSigningKey string) func(h http.Handler) http.Handler {
+	return func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var userID uuid.UUID
+
+			cookie, err := r.Cookie(authCookieName)
+			if err != nil {
+				userID = uuid.New()
+				tokenStr, err := createJWTString(JWTSigningKey, userID)
+				if err != nil {
+					logger.Log.Sugar().Errorw("failed to create jwt token", "error", err)
+					http.Error(w, "internal server error", http.StatusInternalServerError)
+					return
+				}
+
+				cookie = &http.Cookie{
+					HttpOnly: true,
+					Name:     authCookieName,
+					Value:    tokenStr,
+				}
+
+				http.SetCookie(w, cookie)
+			} else {
+				if userID, err = getUserID(JWTSigningKey, cookie.Value); err != nil {
+					logger.Log.Sugar().Errorw("failed to get userID from auth token", "error", err)
+					w.WriteHeader(http.StatusUnauthorized)
+					return
+				}
+			}
+
+			if userID == uuid.Nil {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+
+			r.Header.Set("x-user-id", userID.String())
+			h.ServeHTTP(w, r)
+		})
+	}
+}
+
+func createJWTString(JWTSigningKey string, userID uuid.UUID) (string, error) {
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, Claims{
+		UserID: userID,
+	})
+
+	tokenStr, err := token.SignedString([]byte(JWTSigningKey))
+	if err != nil {
+		return "", err
+	}
+
+	return tokenStr, nil
+}
+
+func getUserID(JWTSigningKey, tokenStr string) (uuid.UUID, error) {
+	if tokenStr == "" {
+		return uuid.Nil, errors.New("token is empty")
+	}
+
+	claims := &Claims{}
+	token, err := jwt.ParseWithClaims(tokenStr, claims,
+		func(t *jwt.Token) (any, error) {
+			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+			}
+
+			return []byte(JWTSigningKey), nil
+		})
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	if !token.Valid {
+		return uuid.Nil, errors.New("token is not valid")
+	}
+
+	return claims.UserID, nil
+}
