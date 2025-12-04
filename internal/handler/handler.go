@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,11 +17,12 @@ import (
 )
 
 type Service interface {
-	CreateID(userID uuid.UUID, url string) (string, error)
-	CreateIDs(userID uuid.UUID, req map[string]string) (map[string]string, error)
-	GetOriginal(id string) (string, error)
-	PingDB() error
-	GetUserURLs(userID uuid.UUID) ([]models.URL, error)
+	CreateID(ctx context.Context, userID uuid.UUID, url string) (string, error)
+	CreateIDs(ctx context.Context, userID uuid.UUID, req map[string]string) (map[string]string, error)
+	GetURL(ctx context.Context, id string) (models.URL, error)
+	PingDB(ctx context.Context) error
+	GetUserURLs(ctx context.Context, userID uuid.UUID) ([]models.URL, error)
+	DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids []string) error
 }
 
 type Handler struct {
@@ -58,7 +60,7 @@ func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	status := http.StatusCreated
 
-	id, err := h.s.CreateID(userID, string(bodyBytes))
+	id, err := h.s.CreateID(r.Context(), userID, string(bodyBytes))
 	if err != nil {
 		var aeErr *errx.ErrAlreadyExists
 		if !errors.As(err, &aeErr) {
@@ -98,7 +100,7 @@ func (h *Handler) ShortenFromJSON(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	status := http.StatusCreated
 
-	id, err := h.s.CreateID(userID, req.URL)
+	id, err := h.s.CreateID(r.Context(), userID, req.URL)
 	if err != nil {
 		var aeErr *errx.ErrAlreadyExists
 		if !errors.As(err, &aeErr) {
@@ -150,7 +152,7 @@ func (h *Handler) ShortenBatch(w http.ResponseWriter, r *http.Request) {
 		originalURLs[req[i].CorrelationID] = req[i].OriginalURL
 	}
 
-	ids, err := h.s.CreateIDs(userID, originalURLs)
+	ids, err := h.s.CreateIDs(r.Context(), userID, originalURLs)
 	if err != nil {
 		var aeErr *errx.ErrAlreadyExists
 		if !errors.As(err, &aeErr) {
@@ -182,9 +184,9 @@ func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	url, err := h.s.GetOriginal(id)
+	url, err := h.s.GetURL(r.Context(), id)
 	if err != nil {
-		if !errors.Is(err, err) {
+		if !errors.Is(err, errx.ErrNotFound) {
 			logger.Log.Sugar().Errorw("failed to get original url", "error", err.Error())
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
@@ -195,11 +197,17 @@ func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/plain")
-	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
+
+	if url.IsDeleted {
+		w.WriteHeader(http.StatusGone)
+		return
+	}
+
+	http.Redirect(w, r, url.Original, http.StatusTemporaryRedirect)
 }
 
 func (h *Handler) PingDB(w http.ResponseWriter, r *http.Request) {
-	if err := h.s.PingDB(); err != nil {
+	if err := h.s.PingDB(r.Context()); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -208,7 +216,7 @@ func (h *Handler) PingDB(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func (h *Handler) GetUserUrls(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	userID, err := uuid.Parse(r.Header.Get("x-user-id"))
 	if err != nil {
 		logger.Log.Sugar().Errorw("failed to parse userID to uuid", "userID", userID)
@@ -216,7 +224,7 @@ func (h *Handler) GetUserUrls(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	urls, err := h.s.GetUserURLs(userID)
+	urls, err := h.s.GetUserURLs(r.Context(), userID)
 	if err != nil {
 		logger.Log.Sugar().Errorw("failed to get user urls", "userID", userID)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -224,6 +232,7 @@ func (h *Handler) GetUserUrls(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+
 	if len(urls) == 0 {
 		w.WriteHeader(http.StatusNoContent)
 	} else {
@@ -241,6 +250,35 @@ func (h *Handler) GetUserUrls(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+func (h *Handler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
+	userID, err := uuid.Parse(r.Header.Get("x-user-id"))
+	if err != nil {
+		logger.Log.Sugar().Errorw("failed to parse userID to uuid", "userID", userID)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	var ids []string
+	if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
+		logger.Log.Sugar().Errorw("cannot read delete user urls request", "error", err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if len(ids) == 0 {
+		http.Error(w, "empty request", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.s.DeleteUserURLs(r.Context(), userID, ids); err != nil {
+		logger.Log.Sugar().Errorw("delete user urls", "error", err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusAccepted)
 }
 
 func (h *Handler) sendBatchResponse(

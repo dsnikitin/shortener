@@ -2,6 +2,7 @@ package handler_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -24,32 +25,37 @@ type MockService struct {
 	mock.Mock
 }
 
-func (m *MockService) CreateID(userID uuid.UUID, url string) (string, error) {
+func (m *MockService) CreateID(ctx context.Context, userID uuid.UUID, url string) (string, error) {
 	args := m.Called(userID, url)
 	return args.String(0), args.Error(1)
 }
 
-func (m *MockService) CreateIDs(userID uuid.UUID, req map[string]string) (map[string]string, error) {
+func (m *MockService) CreateIDs(ctx context.Context, userID uuid.UUID, req map[string]string) (map[string]string, error) {
 	args := m.Called(userID, req)
 	return args.Get(0).(map[string]string), args.Error(1)
 }
 
-func (m *MockService) GetOriginal(id string) (string, error) {
+func (m *MockService) GetURL(ctx context.Context, id string) (models.URL, error) {
 	args := m.Called(id)
-	return args.String(0), args.Error(1)
+	return args.Get(0).(models.URL), args.Error(1)
 }
 
-func (m *MockService) PingDB() error {
+func (m *MockService) PingDB(ctx context.Context) error {
 	args := m.Called()
 	return args.Error(0)
 }
 
-func (m *MockService) GetUserURLs(userID uuid.UUID) ([]models.URL, error) {
+func (m *MockService) GetUserURLs(ctx context.Context, userID uuid.UUID) ([]models.URL, error) {
 	args := m.Called(userID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
 	return args.Get(0).([]models.URL), args.Error(1)
+}
+
+func (m *MockService) DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids []string) error {
+	args := m.Called(userID)
+	return args.Error(0)
 }
 
 func TestHandler_Shorten(t *testing.T) {
@@ -312,7 +318,8 @@ func TestHandler_Redirect(t *testing.T) {
 			id:     "abcdefg",
 			method: http.MethodGet,
 			servicesMockCall: func() {
-				s.On("GetOriginal", "abcdefg").Return("http://localhost:8080/abcdefg", nil).Once()
+				url := models.URL{ID: "abcdefg", Original: "http://localhost:8080/abcdefg"}
+				s.On("GetURL", "abcdefg").Return(url, nil).Once()
 			},
 			want: want{
 				code: http.StatusTemporaryRedirect,
@@ -349,12 +356,25 @@ func TestHandler_Redirect(t *testing.T) {
 			id:     "gfedcba",
 			method: http.MethodGet,
 			servicesMockCall: func() {
-				s.On("GetOriginal", "gfedcba").Return("", errors.New("id not found")).Once()
+				s.On("GetURL", "gfedcba").Return(models.URL{}, errx.ErrNotFound).Once()
 			},
 			want: want{
 				code:    http.StatusNotFound,
 				headers: headers{contentType: "text/plain; charset=utf-8"},
 				resBody: "id not found\n",
+			},
+		},
+		{
+			name:   "gone",
+			id:     "abcdefg",
+			method: http.MethodGet,
+			servicesMockCall: func() {
+				url := models.URL{ID: "abcdefg", Original: "http://localhost:8080/abcdefg", IsDeleted: true}
+				s.On("GetURL", "abcdefg").Return(url, nil).Once()
+			},
+			want: want{
+				code:    http.StatusGone,
+				headers: headers{contentType: "text/plain"},
 			},
 		},
 	}
@@ -627,7 +647,7 @@ func TestHandler_GetUserUrls(t *testing.T) {
 	h := handler.New(cfg.ShortURLBaseAddr, s)
 
 	r := chi.NewRouter()
-	r.Get("/api/user/urls", h.GetUserUrls)
+	r.Get("/api/user/urls", h.GetUserURLs)
 
 	tests := []struct {
 		name             string

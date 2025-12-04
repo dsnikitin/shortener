@@ -25,7 +25,9 @@ func initChiRouter(cfg *config.Config, h *handler.Handler) *chi.Mux {
 			Post("/shorten", http.HandlerFunc(h.ShortenFromJSON))
 		r.With(middleware.BodyMaxBytesReader(config.OriginalURLMaxBatchLength)).
 			Post("/shorten/batch", http.HandlerFunc(h.ShortenBatch))
-		r.Get("/user/urls", http.HandlerFunc(h.GetUserUrls))
+		r.Get("/user/urls", http.HandlerFunc(h.GetUserURLs))
+		r.With(middleware.BodyMaxBytesReader(config.OriginalURLMaxBatchLength)).
+			Delete("/user/urls", http.HandlerFunc(h.DeleteUserURLs))
 	})
 
 	return r

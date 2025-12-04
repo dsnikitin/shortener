@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
@@ -10,38 +11,49 @@ import (
 	"github.com/dsnikitin/shortener/internal/config"
 	"github.com/dsnikitin/shortener/internal/errx"
 	"github.com/dsnikitin/shortener/internal/models"
+	"github.com/dsnikitin/shortener/internal/service/delmgr"
 	"github.com/google/uuid"
 )
 
 type Repository interface {
-	PingDB() error
-	Save(userID uuid.UUID, url models.URL) error
-	SaveMany(userID uuid.UUID, urls []models.URL) error
-	GetURL(id string) (models.URL, error)
-	GetUserURLs(userID uuid.UUID) ([]models.URL, error)
-	Close() error
+	PingDB(ctx context.Context) error
+	Save(ctx context.Context, url models.URL) error
+	SaveMany(ctx context.Context, urls []models.URL) error
+	GetURL(ctx context.Context, id string) (models.URL, error)
+	GetUserURLs(ctx context.Context, userID uuid.UUID) ([]models.URL, error)
+	DeleteUserURLs(ctx context.Context, data []models.DeletableURL)
+	Close()
 }
 
 type Service struct {
-	r Repository
+	r      Repository
+	delMgr *delmgr.DelMgr
 }
 
 func New(r Repository) *Service {
-	return &Service{r: r}
-}
-
-func (s *Service) CreateID(userID uuid.UUID, originalURL string) (string, error) {
-	url := models.URL{
-		ID:       generateID(originalURL),
-		Original: originalURL,
+	s := &Service{
+		r:      r,
+		delMgr: delmgr.New(r),
 	}
 
-	if err := s.r.Save(userID, url); err != nil {
+	s.delMgr.Run()
+
+	return s
+}
+
+func (s *Service) CreateID(ctx context.Context, userID uuid.UUID, originalURL string) (string, error) {
+	url := models.URL{
+		ID:        generateID(originalURL),
+		Original:  originalURL,
+		CreatorID: userID,
+	}
+
+	if err := s.r.Save(ctx, url); err != nil {
 		var aeErr *errx.ErrAlreadyExists
 		if errors.As(err, &aeErr) {
 			if url.Original != aeErr.URL.Original {
 				return "", fmt.Errorf("collision detected - common id %s for requested url %s and existing url %s",
-					aeErr.URL.ID, url.Original, aeErr.URL)
+					aeErr.URL.ID, url.Original, aeErr.URL.Original)
 			}
 		}
 
@@ -51,7 +63,7 @@ func (s *Service) CreateID(userID uuid.UUID, originalURL string) (string, error)
 	return url.ID, nil
 }
 
-func (s *Service) CreateIDs(userID uuid.UUID, req map[string]string) (map[string]string, error) {
+func (s *Service) CreateIDs(ctx context.Context, userID uuid.UUID, req map[string]string) (map[string]string, error) {
 	result := make(map[string]string, len(req))
 	urls := make([]models.URL, 0, len(req))
 
@@ -61,12 +73,13 @@ func (s *Service) CreateIDs(userID uuid.UUID, req map[string]string) (map[string
 		result[correlationID] = id
 
 		urls = append(urls, models.URL{
-			ID:       id,
-			Original: originalURL,
+			ID:        id,
+			Original:  originalURL,
+			CreatorID: userID,
 		})
 	}
 
-	if err := s.r.SaveMany(userID, urls); err != nil {
+	if err := s.r.SaveMany(ctx, urls); err != nil {
 		var aeErr *errx.ErrAlreadyExists
 		if errors.As(err, &aeErr) {
 			for correlationID, id := range result {
@@ -79,7 +92,7 @@ func (s *Service) CreateIDs(userID uuid.UUID, req map[string]string) (map[string
 
 				if id == aeErr.URL.ID {
 					return nil, fmt.Errorf("collision detected - common id %s for requested url %s and existing url %s",
-						id, originalURL, aeErr.URL)
+						id, originalURL, aeErr.URL.Original)
 				}
 
 			}
@@ -92,21 +105,25 @@ func (s *Service) CreateIDs(userID uuid.UUID, req map[string]string) (map[string
 	return result, nil
 }
 
-func (s *Service) GetOriginal(id string) (string, error) {
-	url, err := s.r.GetURL(id)
-	if err != nil {
-		return "", err
-	}
-
-	return url.Original, nil
+func (s *Service) GetURL(ctx context.Context, id string) (models.URL, error) {
+	return s.r.GetURL(ctx, id)
 }
 
-func (s *Service) PingDB() error {
-	return s.r.PingDB()
+func (s *Service) PingDB(ctx context.Context) error {
+	return s.r.PingDB(ctx)
 }
 
-func (s *Service) GetUserURLs(userID uuid.UUID) ([]models.URL, error) {
-	return s.r.GetUserURLs(userID)
+func (s *Service) GetUserURLs(ctx context.Context, userID uuid.UUID) ([]models.URL, error) {
+	return s.r.GetUserURLs(ctx, userID)
+}
+
+func (s *Service) DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids []string) error {
+	return s.delMgr.DeleteURLs(ctx, userID, ids)
+}
+
+func (s *Service) Stop() {
+	s.delMgr.Stop()
+	s.r.Close()
 }
 
 func generateID(url string) string {

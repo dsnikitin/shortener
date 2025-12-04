@@ -3,12 +3,14 @@ package models
 import "github.com/google/uuid"
 
 type URL struct {
-	ID       string
-	Original string
+	ID        string
+	Original  string
+	CreatorID uuid.UUID
+	IsDeleted bool
 }
 
-type UserURL struct {
-	URL
+type DeletableURL struct {
+	ID        string
 	CreatorID uuid.UUID
 }
 

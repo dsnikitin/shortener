@@ -2,6 +2,7 @@ package repository
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,10 +19,10 @@ const queueSize int = 1000
 
 type File struct {
 	mu            sync.RWMutex
-	urlsCache     map[string]string
+	urlsCache     map[string]models.URL
 	userUrlsCache map[uuid.UUID]map[string]struct{}
 	file          *os.File
-	queue         chan models.UserURL
+	queue         chan models.URL
 	shutdown      chan struct{}
 	wg            sync.WaitGroup
 }
@@ -34,10 +35,10 @@ func NewFile(filePath string) (*File, error) {
 
 	r := &File{
 		mu:            sync.RWMutex{},
-		urlsCache:     make(map[string]string),
+		urlsCache:     make(map[string]models.URL),
 		userUrlsCache: make(map[uuid.UUID]map[string]struct{}),
 		file:          file,
-		queue:         make(chan models.UserURL, queueSize),
+		queue:         make(chan models.URL, queueSize),
 		shutdown:      make(chan struct{}),
 	}
 
@@ -55,7 +56,7 @@ func NewFile(filePath string) (*File, error) {
 	return r, nil
 }
 
-func (r *File) Save(userID uuid.UUID, url models.URL) error {
+func (r *File) Save(ctx context.Context, url models.URL) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -63,27 +64,25 @@ func (r *File) Save(userID uuid.UUID, url models.URL) error {
 		return errx.NewAlreadyExistsError(url, errors.New("already exists"))
 	}
 
-	r.urlsCache[url.ID] = url.Original
+	r.urlsCache[url.ID] = url
 
-	if _, ok := r.userUrlsCache[userID]; ok {
-		r.userUrlsCache[userID][url.ID] = struct{}{}
+	if _, ok := r.userUrlsCache[url.CreatorID]; ok {
+		r.userUrlsCache[url.CreatorID][url.ID] = struct{}{}
 	} else {
-		r.userUrlsCache[userID] = map[string]struct{}{url.ID: {}}
+		r.userUrlsCache[url.CreatorID] = map[string]struct{}{url.ID: {}}
 	}
 
-	for {
-		select {
-		case r.queue <- models.UserURL{URL: url, CreatorID: userID}:
-			return nil
-		case <-r.shutdown:
-			return errors.New("file storage closed")
-		}
+	select {
+	case r.queue <- url:
+		return nil
+	case <-r.shutdown:
+		return errors.New("file storage closed")
 	}
 }
 
-func (r *File) SaveMany(userID uuid.UUID, urls []models.URL) error {
+func (r *File) SaveMany(ctx context.Context, urls []models.URL) error {
 	for i := range urls {
-		if err := r.Save(userID, urls[i]); err != nil {
+		if err := r.Save(ctx, urls[i]); err != nil {
 			return fmt.Errorf("save one: %w", err)
 		}
 	}
@@ -91,18 +90,18 @@ func (r *File) SaveMany(userID uuid.UUID, urls []models.URL) error {
 	return nil
 }
 
-func (r *File) GetURL(id string) (models.URL, error) {
+func (r *File) GetURL(ctx context.Context, id string) (models.URL, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	if url, ok := r.urlsCache[id]; ok {
-		return models.URL{ID: id, Original: url}, nil
+		return url, nil
 	}
 
 	return models.URL{}, errx.ErrNotFound
 }
 
-func (r *File) GetUserURLs(userID uuid.UUID) ([]models.URL, error) {
+func (r *File) GetUserURLs(ctx context.Context, userID uuid.UUID) ([]models.URL, error) {
 	var urls []models.URL
 
 	ids, ok := r.userUrlsCache[userID]
@@ -111,51 +110,71 @@ func (r *File) GetUserURLs(userID uuid.UUID) ([]models.URL, error) {
 	}
 
 	for id := range ids {
-		urls = append(urls, models.URL{
-			ID:       id,
-			Original: r.urlsCache[id],
-		})
+		urls = append(urls, r.urlsCache[id])
 	}
 
 	return urls, nil
 }
 
-func (r *File) PingDB() error {
+func (r *File) DeleteUserURLs(ctx context.Context, deletableURLs []models.DeletableURL) {
+	for i, deletableURL := range deletableURLs {
+		select {
+		case <-ctx.Done():
+			logger.Log.Sugar().Warnw("context done", "not deleted urls", deletableURLs[i:])
+			return
+		default:
+			if ids, ok := r.userUrlsCache[deletableURL.CreatorID]; ok {
+				if _, ok := ids[deletableURL.ID]; ok {
+					if url, ok := r.urlsCache[deletableURL.ID]; ok {
+						url.IsDeleted = true
+						r.urlsCache[deletableURL.ID] = url
+						select {
+						case r.queue <- url:
+							continue
+						case <-r.shutdown:
+							logger.Log.Sugar().Warnw("file storage closed", "not deleted urls", deletableURLs[i:])
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+func (r *File) PingDB(ctx context.Context) error {
 	return errors.New("not a db storage")
 }
 
-func (r *File) Close() error {
+func (r *File) Close() {
 	close(r.shutdown)
 	r.wg.Wait()
 
 	if err := r.file.Close(); err != nil {
-		return fmt.Errorf("close file: %w", err)
+		logger.Log.Sugar().Errorw("close file", "error", err)
 	}
-
-	return nil
 }
 
 func (r *File) loadToCache() error {
 	scanner := bufio.NewScanner(r.file)
 
-	var entry models.UserURL
+	var url models.URL
 	for scanner.Scan() {
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
+		if err := json.Unmarshal(scanner.Bytes(), &url); err != nil {
 			return err
 		}
 
-		r.urlsCache[entry.ID] = entry.Original
-		if _, ok := r.userUrlsCache[entry.CreatorID]; ok {
-			r.userUrlsCache[entry.CreatorID][entry.ID] = struct{}{}
+		r.urlsCache[url.ID] = url
+		if _, ok := r.userUrlsCache[url.CreatorID]; ok {
+			r.userUrlsCache[url.CreatorID][url.ID] = struct{}{}
 		} else {
-			r.userUrlsCache[entry.CreatorID] = map[string]struct{}{entry.ID: {}}
+			r.userUrlsCache[url.CreatorID] = map[string]struct{}{url.ID: {}}
 		}
 	}
 
 	return scanner.Err()
 }
 
-func (r *File) saveToFile(url models.UserURL) error {
+func (r *File) saveToFile(url models.URL) error {
 	data, err := json.Marshal(url)
 	if err != nil {
 		return err

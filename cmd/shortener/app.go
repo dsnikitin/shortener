@@ -16,27 +16,28 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/pgx"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 type app struct {
 	server  *http.Server
-	storage service.Repository
+	service *service.Service
 }
 
 func newApp(cfg *config.Config) *app {
-	sqlDB, err := db.New(cfg.DataBase)
+	pgxPool, err := db.New(cfg.DataBase)
 	if err != nil {
 		logger.Log.Sugar().Infow("running without connection to database", "cause", err)
 	}
 
-	if sqlDB != nil {
+	if pgxPool != nil {
 		if err := applyMigrations(cfg.DataBase); err != nil {
 			logger.Log.Sugar().Fatalw("failed to apply migrations", "error", err)
 		}
 	}
 
-	storage, err := initStorage(cfg, sqlDB)
+	storage, err := initStorage(cfg, pgxPool)
 	if err != nil {
 		logger.Log.Sugar().Fatalw("failed to init storage", "error", err)
 	}
@@ -49,7 +50,7 @@ func newApp(cfg *config.Config) *app {
 
 	return &app{
 		server:  server,
-		storage: storage,
+		service: s,
 	}
 }
 
@@ -61,15 +62,13 @@ func (a *app) start() {
 }
 
 func (a *app) shutdown() {
+	a.service.Stop()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if err := a.storage.Close(); err != nil {
-		logger.Log.Sugar().Errorw("storage close failed", "error", err)
-	}
-
 	if err := a.server.Shutdown(ctx); err != nil {
-		logger.Log.Sugar().Errorw("shutdown failed", "error", err)
+		logger.Log.Sugar().Errorw("server gracefull shutdown failed", "error", err)
 		return
 	}
 
@@ -104,7 +103,7 @@ func applyMigrations(cfg *db.Config) error {
 	return nil
 }
 
-func initStorage(cfg *config.Config, db *sql.DB) (service.Repository, error) {
+func initStorage(cfg *config.Config, db *pgxpool.Pool) (service.Repository, error) {
 	switch {
 	case db != nil:
 		return repository.NewPostgres(db), nil

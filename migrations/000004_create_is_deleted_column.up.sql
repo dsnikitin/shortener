@@ -1,0 +1,2 @@
+ALTER TABLE shortener.urls
+ADD COLUMN IF NOT EXISTS is_deleted BOOL NOT NULL DEFAULT false;
