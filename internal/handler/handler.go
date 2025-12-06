@@ -38,10 +38,8 @@ func New(shortURLBaseAddr string, s Service) *Handler {
 }
 
 func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
-	userID, err := uuid.Parse(r.Header.Get("x-user-id"))
-	if err != nil {
-		logger.Log.Sugar().Errorw("failed to parse userID to uuid", "userID", userID)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+	userID, ok := parseUserID(w, r)
+	if !ok {
 		return
 	}
 
@@ -78,10 +76,8 @@ func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ShortenFromJSON(w http.ResponseWriter, r *http.Request) {
-	userID, err := uuid.Parse(r.Header.Get("x-user-id"))
-	if err != nil {
-		logger.Log.Sugar().Errorw("failed to parse userID to uuid", "userID", userID)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+	userID, ok := parseUserID(w, r)
+	if !ok {
 		return
 	}
 
@@ -123,10 +119,8 @@ func (h *Handler) ShortenFromJSON(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ShortenBatch(w http.ResponseWriter, r *http.Request) {
-	userID, err := uuid.Parse(r.Header.Get("x-user-id"))
-	if err != nil {
-		logger.Log.Sugar().Errorw("failed to parse userID to uuid", "userID", userID)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+	userID, ok := parseUserID(w, r)
+	if !ok {
 		return
 	}
 
@@ -217,10 +211,8 @@ func (h *Handler) PingDB(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
-	userID, err := uuid.Parse(r.Header.Get("x-user-id"))
-	if err != nil {
-		logger.Log.Sugar().Errorw("failed to parse userID to uuid", "userID", userID)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+	userID, ok := parseUserID(w, r)
+	if !ok {
 		return
 	}
 
@@ -231,32 +223,32 @@ func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-
-	if len(urls) == 0 {
-		w.WriteHeader(http.StatusNoContent)
-	} else {
-		resp := make([]models.GetUserUrlsResponseItem, 0, len(urls))
-		for i := range urls {
+	resp := make([]models.GetUserUrlsResponseItem, 0, len(urls))
+	for i := range urls {
+		if !urls[i].IsDeleted {
 			resp = append(resp, models.GetUserUrlsResponseItem{
 				ShortURL:    h.shortURLBaseAddr + "/" + urls[i].ID,
 				OriginalURL: urls[i].Original,
 			})
 		}
+	}
 
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			logger.Log.Sugar().Errorw("encoding user urls response", "error", err)
-			return
-		}
+	if len(resp) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		logger.Log.Sugar().Errorw("encoding user urls response", "error", err)
+		return
 	}
 }
 
 func (h *Handler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
-	userID, err := uuid.Parse(r.Header.Get("x-user-id"))
-	if err != nil {
-		logger.Log.Sugar().Errorw("failed to parse userID to uuid", "userID", userID)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+	userID, ok := parseUserID(w, r)
+	if !ok {
 		return
 	}
 
@@ -305,4 +297,16 @@ func (h *Handler) sendBatchResponse(
 		logger.Log.Sugar().Errorw("encoding shorten batch response", "error", err)
 		return
 	}
+}
+
+func parseUserID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
+	strUserID := r.Header.Get("x-user-id")
+	userID, err := uuid.Parse(strUserID)
+	if err != nil {
+		logger.Log.Sugar().Errorw("failed to parse userID to uuid", "userID", strUserID)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return uuid.Nil, false
+	}
+
+	return userID, true
 }

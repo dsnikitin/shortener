@@ -1,4 +1,4 @@
-package delmgr
+package deleter
 
 import (
 	"context"
@@ -17,10 +17,10 @@ const batchSize = 100
 const inputWorkers = 5
 
 type Repository interface {
-	DeleteUserURLs(ctx context.Context, data []models.DeletableURL)
+	DeleteURLs(ctx context.Context, data []models.DeletableURL)
 }
 
-type DelMgr struct {
+type Deleter struct {
 	r Repository
 
 	inputCh  chan models.DeletableURL
@@ -34,8 +34,8 @@ type DelMgr struct {
 	flushCh chan struct{}
 }
 
-func New(r Repository) *DelMgr {
-	m := &DelMgr{
+func New(r Repository) *Deleter {
+	m := &Deleter{
 		r:        r,
 		inputCh:  make(chan models.DeletableURL),
 		outputCh: make(chan []models.DeletableURL, 1),
@@ -47,7 +47,7 @@ func New(r Repository) *DelMgr {
 	return m
 }
 
-func (m *DelMgr) Run() {
+func (m *Deleter) Run() {
 	for range inputWorkers {
 		m.wg.Add(1)
 		go m.inputWorker()
@@ -60,14 +60,14 @@ func (m *DelMgr) Run() {
 	go m.writer()
 }
 
-func (m *DelMgr) Stop() {
+func (m *Deleter) Stop() {
 	close(m.stopCh)
 	m.wg.Wait()
 
 	logger.Log.Sugar().Info("deletion manager stopped")
 }
 
-func (m *DelMgr) DeleteURLs(ctx context.Context, userID uuid.UUID, ids []string) error {
+func (m *Deleter) DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids []string) error {
 	for _, id := range ids {
 		select {
 		case <-ctx.Done():
@@ -81,7 +81,7 @@ func (m *DelMgr) DeleteURLs(ctx context.Context, userID uuid.UUID, ids []string)
 	return nil
 }
 
-func (m *DelMgr) inputWorker() {
+func (m *Deleter) inputWorker() {
 	defer m.wg.Done()
 
 	for {
@@ -98,7 +98,7 @@ func (m *DelMgr) inputWorker() {
 	}
 }
 
-func (m *DelMgr) addToBuffer(data models.DeletableURL) {
+func (m *Deleter) addToBuffer(data models.DeletableURL) {
 	m.mu.Lock()
 	m.buffer = append(m.buffer, data)
 	if len(m.buffer) >= batchSize {
@@ -110,7 +110,7 @@ func (m *DelMgr) addToBuffer(data models.DeletableURL) {
 	m.mu.Unlock()
 }
 
-func (m *DelMgr) flusher() {
+func (m *Deleter) flusher() {
 	defer m.wg.Done()
 
 	ticker := time.NewTicker(time.Second * flushSecondsInterval)
@@ -129,7 +129,7 @@ func (m *DelMgr) flusher() {
 	}
 }
 
-func (m *DelMgr) flushBuffer() {
+func (m *Deleter) flushBuffer() {
 	m.mu.Lock()
 	if len(m.buffer) == 0 {
 		m.mu.Unlock()
@@ -143,7 +143,7 @@ func (m *DelMgr) flushBuffer() {
 	m.outputCh <- batch
 }
 
-func (m *DelMgr) writer() {
+func (m *Deleter) writer() {
 	defer m.wg.Done()
 
 	for {
@@ -156,7 +156,7 @@ func (m *DelMgr) writer() {
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*dbRequestSecondsTimeout)
-			m.r.DeleteUserURLs(ctx, batch)
+			m.r.DeleteURLs(ctx, batch)
 			cancel()
 		}
 	}

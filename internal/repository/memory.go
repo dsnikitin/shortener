@@ -81,7 +81,7 @@ func (r *Memory) GetUserURLs(ctx context.Context, userID uuid.UUID) ([]models.UR
 	return res, nil
 }
 
-func (r *Memory) DeleteUserURLs(ctx context.Context, deletableURLs []models.DeletableURL) {
+func (r *Memory) DeleteURLs(ctx context.Context, deletableURLs []models.DeletableURL) {
 	for i, deletableURL := range deletableURLs {
 		select {
 		case <-ctx.Done():

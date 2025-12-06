@@ -141,7 +141,7 @@ const deleteUserURLsSQL = `
 	WHERE id = @id AND creator_id = @creatorID
 `
 
-func (r *Postgres) DeleteUserURLs(ctx context.Context, urls []models.DeletableURL) {
+func (r *Postgres) DeleteURLs(ctx context.Context, urls []models.DeletableURL) {
 	batch := &pgx.Batch{}
 	for i := range urls {
 		batch.Queue(deleteUserURLsSQL,

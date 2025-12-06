@@ -116,7 +116,7 @@ func (r *File) GetUserURLs(ctx context.Context, userID uuid.UUID) ([]models.URL,
 	return urls, nil
 }
 
-func (r *File) DeleteUserURLs(ctx context.Context, deletableURLs []models.DeletableURL) {
+func (r *File) DeleteURLs(ctx context.Context, deletableURLs []models.DeletableURL) {
 	for i, deletableURL := range deletableURLs {
 		select {
 		case <-ctx.Done():

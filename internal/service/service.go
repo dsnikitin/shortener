@@ -11,7 +11,7 @@ import (
 	"github.com/dsnikitin/shortener/internal/config"
 	"github.com/dsnikitin/shortener/internal/errx"
 	"github.com/dsnikitin/shortener/internal/models"
-	"github.com/dsnikitin/shortener/internal/service/delmgr"
+	"github.com/dsnikitin/shortener/internal/service/deleter"
 	"github.com/google/uuid"
 )
 
@@ -21,22 +21,28 @@ type Repository interface {
 	SaveMany(ctx context.Context, urls []models.URL) error
 	GetURL(ctx context.Context, id string) (models.URL, error)
 	GetUserURLs(ctx context.Context, userID uuid.UUID) ([]models.URL, error)
-	DeleteUserURLs(ctx context.Context, data []models.DeletableURL)
+	DeleteURLs(ctx context.Context, data []models.DeletableURL)
 	Close()
 }
 
+type URLDeleter interface {
+	DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids []string) error
+	Run()
+	Stop()
+}
+
 type Service struct {
-	r      Repository
-	delMgr *delmgr.DelMgr
+	r Repository
+	d URLDeleter
 }
 
 func New(r Repository) *Service {
 	s := &Service{
-		r:      r,
-		delMgr: delmgr.New(r),
+		r: r,
+		d: deleter.New(r),
 	}
 
-	s.delMgr.Run()
+	s.d.Run()
 
 	return s
 }
@@ -118,11 +124,11 @@ func (s *Service) GetUserURLs(ctx context.Context, userID uuid.UUID) ([]models.U
 }
 
 func (s *Service) DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids []string) error {
-	return s.delMgr.DeleteURLs(ctx, userID, ids)
+	return s.d.DeleteUserURLs(ctx, userID, ids)
 }
 
 func (s *Service) Stop() {
-	s.delMgr.Stop()
+	s.d.Stop()
 	s.r.Close()
 }
 
