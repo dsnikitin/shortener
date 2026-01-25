@@ -8,9 +8,9 @@ import (
 )
 
 const (
-	IDMaxLength                int   = 8
-	OriginalURLMaxLength       int64 = 2048
-	MaxOriginalURLCountInBatch int64 = 500
+	IDMaxLength               int   = 8
+	OriginalURLMaxLength      int64 = 2048
+	OriginalURLMaxBatchLength int64 = 2048000
 )
 
 type Config struct {
@@ -18,6 +18,7 @@ type Config struct {
 	ShortURLBaseAddr string `env:"BASE_URL"`
 	LogLevel         string `env:"LOG_LEVEL"`
 	FileStoragePath  string `env:"FILE_STORAGE_PATH"`
+	JWTSigningKey    string `env:"JWT_SIGNING_KEY"`
 	DataBase         *db.Config
 }
 

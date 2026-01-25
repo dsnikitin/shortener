@@ -2,6 +2,7 @@ package handler_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"github.com/dsnikitin/shortener/internal/handler"
 	"github.com/dsnikitin/shortener/internal/models"
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -23,27 +25,42 @@ type MockService struct {
 	mock.Mock
 }
 
-func (m *MockService) CreateID(url string) (string, error) {
-	args := m.Called(url)
+func (m *MockService) CreateID(ctx context.Context, userID uuid.UUID, url string) (string, error) {
+	args := m.Called(userID, url)
 	return args.String(0), args.Error(1)
 }
 
-func (m *MockService) CreateIDs(req map[string]string) (map[string]string, error) {
-	args := m.Called(req)
+func (m *MockService) CreateIDs(ctx context.Context, userID uuid.UUID, req map[string]string) (map[string]string, error) {
+	args := m.Called(userID, req)
 	return args.Get(0).(map[string]string), args.Error(1)
 }
 
-func (m *MockService) GetOriginal(id string) (string, error) {
+func (m *MockService) GetURL(ctx context.Context, id string) (models.URL, error) {
 	args := m.Called(id)
-	return args.String(0), args.Error(1)
+	return args.Get(0).(models.URL), args.Error(1)
 }
 
-func (m *MockService) PingDB() error {
+func (m *MockService) PingDB(ctx context.Context) error {
 	args := m.Called()
 	return args.Error(0)
 }
 
+func (m *MockService) GetUserURLs(ctx context.Context, userID uuid.UUID) ([]models.URL, error) {
+	args := m.Called(userID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]models.URL), args.Error(1)
+}
+
+func (m *MockService) DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids []string) error {
+	args := m.Called(userID)
+	return args.Error(0)
+}
+
 func TestHandler_Shorten(t *testing.T) {
+	userID := uuid.New()
+
 	type headers struct {
 		contentType string
 	}
@@ -54,13 +71,12 @@ func TestHandler_Shorten(t *testing.T) {
 		resBody string
 	}
 
-	conf := &config.Config{
-		ServerAddr:       "localhost:8080",
+	cfg := &config.Config{
 		ShortURLBaseAddr: "http://localhost:8080",
 	}
 
 	s := new(MockService)
-	h := handler.New(conf, s)
+	h := handler.New(cfg.ShortURLBaseAddr, s)
 
 	r := chi.NewRouter()
 	r.Post("/", h.Shorten)
@@ -68,16 +84,18 @@ func TestHandler_Shorten(t *testing.T) {
 	tests := []struct {
 		name             string
 		method           string
+		userID           string
 		reqBody          string
 		servicesMockCall func()
 		want             want
 	}{
 		{
-			name:    "positive test",
+			name:    "positive",
 			method:  http.MethodPost,
+			userID:  userID.String(),
 			reqBody: "https://practicum.yandex.ru/",
 			servicesMockCall: func() {
-				s.On("CreateID", "https://practicum.yandex.ru/").Return("abcdefg", nil).Once()
+				s.On("CreateID", userID, "https://practicum.yandex.ru/").Return("abcdefg", nil).Once()
 			},
 			want: want{
 				code:    http.StatusCreated,
@@ -97,6 +115,7 @@ func TestHandler_Shorten(t *testing.T) {
 		{
 			name:             "empty body",
 			method:           http.MethodPost,
+			userID:           userID.String(),
 			reqBody:          "",
 			servicesMockCall: func() {},
 			want: want{
@@ -108,11 +127,12 @@ func TestHandler_Shorten(t *testing.T) {
 		{
 			name:    "already exist",
 			method:  http.MethodPost,
+			userID:  userID.String(),
 			reqBody: "https://practicum.yandex.ru/",
 			servicesMockCall: func() {
 				url := models.URL{ID: "abcdefg", Original: "https://practicum.yandex.ru/"}
 				err := errx.NewAlreadyExistsError(url, errors.New("already exists"))
-				s.On("CreateID", "https://practicum.yandex.ru/").Return("", err).Once()
+				s.On("CreateID", userID, "https://practicum.yandex.ru/").Return("", err).Once()
 			},
 			want: want{
 				code:    http.StatusConflict,
@@ -127,6 +147,9 @@ func TestHandler_Shorten(t *testing.T) {
 			test.servicesMockCall()
 
 			req := httptest.NewRequest(test.method, "/", bytes.NewBufferString(test.reqBody))
+			if test.userID != "" {
+				req.Header.Set("x-user-id", test.userID)
+			}
 			recorder := httptest.NewRecorder()
 
 			r.ServeHTTP(recorder, req)
@@ -144,6 +167,8 @@ func TestHandler_Shorten(t *testing.T) {
 }
 
 func TestHandler_ShortenFromJSON(t *testing.T) {
+	userID := uuid.New()
+
 	type headers struct {
 		contentType string
 	}
@@ -155,13 +180,12 @@ func TestHandler_ShortenFromJSON(t *testing.T) {
 		errMsg  string
 	}
 
-	conf := &config.Config{
-		ServerAddr:       "localhost:8080",
+	cfg := &config.Config{
 		ShortURLBaseAddr: "http://localhost:8080",
 	}
 
 	s := new(MockService)
-	h := handler.New(conf, s)
+	h := handler.New(cfg.ShortURLBaseAddr, s)
 
 	r := chi.NewRouter()
 	r.Post("/api/shorten", h.ShortenFromJSON)
@@ -169,16 +193,18 @@ func TestHandler_ShortenFromJSON(t *testing.T) {
 	tests := []struct {
 		name             string
 		method           string
+		userID           string
 		req              models.ShortenRequest
 		servicesMockCall func()
 		want             want
 	}{
 		{
-			name:   "positive test",
+			name:   "positive",
 			method: http.MethodPost,
+			userID: userID.String(),
 			req:    models.ShortenRequest{URL: "https://practicum.yandex.ru/"},
 			servicesMockCall: func() {
-				s.On("CreateID", "https://practicum.yandex.ru/").Return("abcdefg", nil).Once()
+				s.On("CreateID", userID, "https://practicum.yandex.ru/").Return("abcdefg", nil).Once()
 			},
 			want: want{
 				code:    http.StatusCreated,
@@ -198,6 +224,7 @@ func TestHandler_ShortenFromJSON(t *testing.T) {
 		{
 			name:             "empty url",
 			method:           http.MethodPost,
+			userID:           userID.String(),
 			req:              models.ShortenRequest{URL: ""},
 			servicesMockCall: func() {},
 			want: want{
@@ -209,11 +236,12 @@ func TestHandler_ShortenFromJSON(t *testing.T) {
 		{
 			name:   "already exist",
 			method: http.MethodPost,
+			userID: userID.String(),
 			req:    models.ShortenRequest{URL: "https://practicum.yandex.ru/"},
 			servicesMockCall: func() {
 				url := models.URL{ID: "abcdefg", Original: "https://practicum.yandex.ru/"}
 				err := errx.NewAlreadyExistsError(url, errors.New("already exists"))
-				s.On("CreateID", "https://practicum.yandex.ru/").Return("", err).Once()
+				s.On("CreateID", userID, "https://practicum.yandex.ru/").Return("", err).Once()
 			},
 			want: want{
 				code:    http.StatusConflict,
@@ -232,6 +260,9 @@ func TestHandler_ShortenFromJSON(t *testing.T) {
 
 			req := httptest.NewRequest(test.method, "/api/shorten", bytes.NewBuffer(body))
 			req.Header.Add("Content-Type", "application/json")
+			if test.userID != "" {
+				req.Header.Set("x-user-id", test.userID)
+			}
 			recorder := httptest.NewRecorder()
 
 			r.ServeHTTP(recorder, req)
@@ -265,13 +296,12 @@ func TestHandler_Redirect(t *testing.T) {
 		resBody string
 	}
 
-	conf := &config.Config{
-		ServerAddr:       "localhost:8080",
+	cfg := &config.Config{
 		ShortURLBaseAddr: "http://localhost:8080",
 	}
 
 	s := new(MockService)
-	h := handler.New(conf, s)
+	h := handler.New(cfg.ShortURLBaseAddr, s)
 
 	r := chi.NewRouter()
 	r.Get("/{id}", h.Redirect)
@@ -288,7 +318,8 @@ func TestHandler_Redirect(t *testing.T) {
 			id:     "abcdefg",
 			method: http.MethodGet,
 			servicesMockCall: func() {
-				s.On("GetOriginal", "abcdefg").Return("http://localhost:8080/abcdefg", nil).Once()
+				url := models.URL{ID: "abcdefg", Original: "http://localhost:8080/abcdefg"}
+				s.On("GetURL", "abcdefg").Return(url, nil).Once()
 			},
 			want: want{
 				code: http.StatusTemporaryRedirect,
@@ -325,12 +356,25 @@ func TestHandler_Redirect(t *testing.T) {
 			id:     "gfedcba",
 			method: http.MethodGet,
 			servicesMockCall: func() {
-				s.On("GetOriginal", "gfedcba").Return("", errors.New("id not found")).Once()
+				s.On("GetURL", "gfedcba").Return(models.URL{}, errx.ErrNotFound).Once()
 			},
 			want: want{
 				code:    http.StatusNotFound,
 				headers: headers{contentType: "text/plain; charset=utf-8"},
 				resBody: "id not found\n",
+			},
+		},
+		{
+			name:   "gone",
+			id:     "abcdefg",
+			method: http.MethodGet,
+			servicesMockCall: func() {
+				url := models.URL{ID: "abcdefg", Original: "http://localhost:8080/abcdefg", IsDeleted: true}
+				s.On("GetURL", "abcdefg").Return(url, nil).Once()
+			},
+			want: want{
+				code:    http.StatusGone,
+				headers: headers{contentType: "text/plain"},
 			},
 		},
 	}
@@ -363,13 +407,12 @@ func TestHandler_PingDB(t *testing.T) {
 		contentType string
 	}
 
-	conf := &config.Config{
-		ServerAddr:       "localhost:8080",
+	cfg := &config.Config{
 		ShortURLBaseAddr: "http://localhost:8080",
 	}
 
 	s := new(MockService)
-	h := handler.New(conf, s)
+	h := handler.New(cfg.ShortURLBaseAddr, s)
 
 	r := chi.NewRouter()
 	r.Get("/ping", h.PingDB)
@@ -430,6 +473,8 @@ func TestHandler_PingDB(t *testing.T) {
 }
 
 func TestHandler_ShortenBatch(t *testing.T) {
+	userID := uuid.New()
+
 	type headers struct {
 		contentType string
 	}
@@ -441,13 +486,12 @@ func TestHandler_ShortenBatch(t *testing.T) {
 		errMsg  string
 	}
 
-	conf := &config.Config{
-		ServerAddr:       "localhost:8080",
+	cfg := &config.Config{
 		ShortURLBaseAddr: "http://localhost:8080",
 	}
 
 	s := new(MockService)
-	h := handler.New(conf, s)
+	h := handler.New(cfg.ShortURLBaseAddr, s)
 
 	r := chi.NewRouter()
 	r.Post("/api/shorten/batch", h.ShortenBatch)
@@ -455,6 +499,7 @@ func TestHandler_ShortenBatch(t *testing.T) {
 	tests := []struct {
 		name             string
 		method           string
+		userID           string
 		req              []models.ShortenBatchRequest
 		servicesMockCall func()
 		want             want
@@ -462,6 +507,7 @@ func TestHandler_ShortenBatch(t *testing.T) {
 		{
 			name:   "positive test",
 			method: http.MethodPost,
+			userID: userID.String(),
 			req: []models.ShortenBatchRequest{
 				{CorrelationID: "1", OriginalURL: "http://bstoudwr.biz/ray1dv90xyg"},
 				{CorrelationID: "2", OriginalURL: "https://practicum.yandex.ru/"},
@@ -470,7 +516,7 @@ func TestHandler_ShortenBatch(t *testing.T) {
 				URLs := map[string]string{"1": "http://bstoudwr.biz/ray1dv90xyg", "2": "https://practicum.yandex.ru/"}
 				ids := map[string]string{"1": "gfedcba", "2": "abcdefg"}
 
-				s.On("CreateIDs", URLs).Return(ids, nil).Once()
+				s.On("CreateIDs", userID, URLs).Return(ids, nil).Once()
 			},
 			want: want{
 				code:    http.StatusCreated,
@@ -496,6 +542,7 @@ func TestHandler_ShortenBatch(t *testing.T) {
 		{
 			name:             "empty request",
 			method:           http.MethodPost,
+			userID:           userID.String(),
 			req:              []models.ShortenBatchRequest{},
 			servicesMockCall: func() {},
 			want: want{
@@ -507,6 +554,7 @@ func TestHandler_ShortenBatch(t *testing.T) {
 		{
 			name:   "duplicate correlationID",
 			method: http.MethodPost,
+			userID: userID.String(),
 			req: []models.ShortenBatchRequest{
 				{CorrelationID: "1", OriginalURL: "https://practicum.yandex.ru/"},
 				{CorrelationID: "2", OriginalURL: "http://bstoudwr.biz/ray1dv90xyg"},
@@ -522,6 +570,7 @@ func TestHandler_ShortenBatch(t *testing.T) {
 		{
 			name:   "already exist",
 			method: http.MethodPost,
+			userID: userID.String(),
 			req: []models.ShortenBatchRequest{
 				{CorrelationID: "1", OriginalURL: "http://bstoudwr.biz/ray1dv90xyg"},
 				{CorrelationID: "2", OriginalURL: "https://practicum.yandex.ru/"},
@@ -531,7 +580,7 @@ func TestHandler_ShortenBatch(t *testing.T) {
 
 				existingURL := models.URL{ID: "abcdefg", Original: "https://practicum.yandex.ru/"}
 				err := &errx.ErrAlreadyExists{CorrelationID: "2", URL: existingURL, Err: errors.New("already exists")}
-				s.On("CreateIDs", URLs).Return(map[string]string{}, err).Once()
+				s.On("CreateIDs", userID, URLs).Return(map[string]string{}, err).Once()
 			},
 			want: want{
 				code:    http.StatusConflict,
@@ -550,6 +599,9 @@ func TestHandler_ShortenBatch(t *testing.T) {
 
 			req := httptest.NewRequest(test.method, "/api/shorten/batch", bytes.NewBuffer(body))
 			req.Header.Add("Content-Type", "application/json")
+			if test.userID != "" {
+				req.Header.Set("x-user-id", test.userID)
+			}
 			recorder := httptest.NewRecorder()
 
 			r.ServeHTTP(recorder, req)
@@ -567,6 +619,149 @@ func TestHandler_ShortenBatch(t *testing.T) {
 				err = json.NewDecoder(res.Body).Decode(&resp)
 				require.NoError(t, err)
 				assert.Equal(t, test.want.resp, resp)
+			}
+		})
+	}
+}
+
+func TestHandler_GetUserUrls(t *testing.T) {
+	userID := uuid.New()
+
+	type headers struct {
+		contentType string
+		userID      string
+	}
+
+	type want struct {
+		code    int
+		headers headers
+		resp    []models.GetUserUrlsResponseItem
+		errMsg  string
+	}
+
+	cfg := &config.Config{
+		ShortURLBaseAddr: "http://localhost:8080",
+	}
+
+	s := new(MockService)
+	h := handler.New(cfg.ShortURLBaseAddr, s)
+
+	r := chi.NewRouter()
+	r.Get("/api/user/urls", h.GetUserURLs)
+
+	tests := []struct {
+		name             string
+		method           string
+		userID           string
+		servicesMockCall func()
+		want             want
+	}{
+		{
+			name:   "positive with urls",
+			method: http.MethodGet,
+			userID: userID.String(),
+			servicesMockCall: func() {
+				urls := []models.URL{
+					{ID: "gfedcba", Original: "http://bstoudwr.biz/ray1dv90xyg"},
+					{ID: "abcdefg", Original: "https://practicum.yandex.ru/"},
+				}
+				s.On("GetUserURLs", userID).Return(urls, nil).Once()
+			},
+			want: want{
+				code:    http.StatusOK,
+				headers: headers{contentType: "application/json"},
+				resp: []models.GetUserUrlsResponseItem{
+					{ShortURL: cfg.ShortURLBaseAddr + "/" + "gfedcba", OriginalURL: "http://bstoudwr.biz/ray1dv90xyg"},
+					{ShortURL: cfg.ShortURLBaseAddr + "/" + "abcdefg", OriginalURL: "https://practicum.yandex.ru/"},
+				},
+			},
+		},
+		{
+			name:   "positive no content",
+			method: http.MethodGet,
+			userID: userID.String(),
+			servicesMockCall: func() {
+				s.On("GetUserURLs", userID).Return([]models.URL{}, nil).Once()
+			},
+			want: want{
+				code:    http.StatusNoContent,
+				headers: headers{contentType: "application/json"},
+			},
+		},
+		{
+			name:             "wrong method",
+			method:           http.MethodPost,
+			userID:           userID.String(),
+			servicesMockCall: func() {},
+			want: want{
+				code: http.StatusMethodNotAllowed,
+			},
+		},
+		{
+			name:             "missing x-user-id header",
+			method:           http.MethodGet,
+			userID:           "",
+			servicesMockCall: func() {},
+			want: want{
+				code:    http.StatusInternalServerError,
+				headers: headers{contentType: "text/plain; charset=utf-8"},
+				errMsg:  "internal server error\n",
+			},
+		},
+		{
+			name:             "invalid userID",
+			method:           http.MethodGet,
+			userID:           "invalid-uuid",
+			servicesMockCall: func() {},
+			want: want{
+				code:    http.StatusInternalServerError,
+				headers: headers{contentType: "text/plain; charset=utf-8"},
+				errMsg:  "internal server error\n",
+			},
+		},
+		{
+			name:   "service error",
+			method: http.MethodGet,
+			userID: userID.String(),
+			servicesMockCall: func() {
+				s.On("GetUserURLs", userID).Return(nil, errors.New("database error")).Once()
+			},
+			want: want{
+				code:    http.StatusInternalServerError,
+				headers: headers{contentType: "text/plain; charset=utf-8"},
+				errMsg:  "internal server error\n",
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.servicesMockCall()
+
+			req := httptest.NewRequest(test.method, "/api/user/urls", nil)
+			if test.userID != "" {
+				req.Header.Set("x-user-id", test.userID)
+			}
+			recorder := httptest.NewRecorder()
+
+			r.ServeHTTP(recorder, req)
+			res := recorder.Result()
+			defer res.Body.Close()
+
+			assert.Equal(t, test.want.code, res.StatusCode)
+			assert.Equal(t, test.want.headers.contentType, res.Header.Get("Content-Type"))
+
+			if test.want.code == http.StatusOK {
+				var resp []models.GetUserUrlsResponseItem
+				err := json.NewDecoder(res.Body).Decode(&resp)
+				require.NoError(t, err)
+				assert.Equal(t, test.want.resp, resp)
+			} else if test.want.code == http.StatusNoContent {
+				assert.Equal(t, 0, recorder.Body.Len(), "response body should be empty for 204 status code")
+			} else if test.want.code >= 400 {
+				respBody, err := io.ReadAll(res.Body)
+				require.NoError(t, err)
+				assert.Equal(t, test.want.errMsg, string(respBody))
 			}
 		})
 	}

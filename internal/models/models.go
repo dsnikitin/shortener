@@ -1,8 +1,17 @@
 package models
 
+import "github.com/google/uuid"
+
 type URL struct {
-	ID       string
-	Original string
+	ID        string
+	Original  string
+	CreatorID uuid.UUID
+	IsDeleted bool
+}
+
+type DeletableURL struct {
+	ID        string
+	CreatorID uuid.UUID
 }
 
 type ShortenRequest struct {
@@ -21,4 +30,9 @@ type ShortenBatchRequest struct {
 type ShortenBatchResponse struct {
 	CorrelationID string `json:"correlation_id"`
 	ShortURL      string `json:"short_url"`
+}
+
+type GetUserUrlsResponseItem struct {
+	ShortURL    string `json:"short_url"`
+	OriginalURL string `json:"original_url"`
 }

@@ -2,25 +2,29 @@ package repository
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"sync"
 
 	"github.com/dsnikitin/shortener/internal/errx"
 	"github.com/dsnikitin/shortener/internal/logger"
 	"github.com/dsnikitin/shortener/internal/models"
+	"github.com/google/uuid"
 )
 
 const queueSize int = 1000
 
 type File struct {
-	mu       sync.RWMutex
-	cache    map[string]string
-	file     *os.File
-	queue    chan models.URL
-	shutdown chan struct{}
-	wg       sync.WaitGroup
+	mu            sync.RWMutex
+	urlsCache     map[string]models.URL
+	userUrlsCache map[uuid.UUID]map[string]struct{}
+	file          *os.File
+	queue         chan models.URL
+	shutdown      chan struct{}
+	wg            sync.WaitGroup
 }
 
 func NewFile(filePath string) (*File, error) {
@@ -30,11 +34,12 @@ func NewFile(filePath string) (*File, error) {
 	}
 
 	r := &File{
-		mu:       sync.RWMutex{},
-		cache:    make(map[string]string),
-		file:     file,
-		queue:    make(chan models.URL, queueSize),
-		shutdown: make(chan struct{}),
+		mu:            sync.RWMutex{},
+		urlsCache:     make(map[string]models.URL),
+		userUrlsCache: make(map[uuid.UUID]map[string]struct{}),
+		file:          file,
+		queue:         make(chan models.URL, queueSize),
+		shutdown:      make(chan struct{}),
 	}
 
 	if err := r.loadToCache(); err != nil {
@@ -51,67 +56,92 @@ func NewFile(filePath string) (*File, error) {
 	return r, nil
 }
 
-func (r *File) Save(url models.URL) error {
+func (r *File) Save(ctx context.Context, url models.URL) error {
 	r.mu.Lock()
-	if _, ok := r.cache[url.ID]; ok {
-		r.mu.Unlock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.urlsCache[url.ID]; ok {
 		return errx.NewAlreadyExistsError(url, errors.New("already exists"))
 	}
 
-	r.cache[url.ID] = url.Original
-	r.mu.Unlock()
+	r.urlsCache[url.ID] = url
 
-	for {
-		select {
-		case r.queue <- url:
-			return nil
-		case <-r.shutdown:
-			return errors.New("file storage closed")
-		}
+	if _, ok := r.userUrlsCache[url.CreatorID]; ok {
+		r.userUrlsCache[url.CreatorID][url.ID] = struct{}{}
+	} else {
+		r.userUrlsCache[url.CreatorID] = map[string]struct{}{url.ID: {}}
+	}
+
+	select {
+	case r.queue <- url:
+		return nil
+	case <-r.shutdown:
+		return errors.New("file storage closed")
 	}
 }
 
-func (r *File) SaveMany(urls []models.URL) error {
-	r.mu.Lock()
-
+func (r *File) SaveMany(ctx context.Context, urls []models.URL) error {
 	for i := range urls {
-		if _, ok := r.cache[urls[i].ID]; ok {
-			r.mu.Unlock()
-			return errx.NewAlreadyExistsError(urls[i], errors.New("already exists"))
-		}
-	}
-
-	for i := range urls {
-		r.cache[urls[i].ID] = urls[i].Original
-	}
-	r.mu.Unlock()
-
-	for i := range urls {
-		for {
-			select {
-			case r.queue <- urls[i]:
-				continue
-			case <-r.shutdown:
-				return errors.New("file storage closed")
-			}
+		if err := r.Save(ctx, urls[i]); err != nil {
+			return fmt.Errorf("save one: %w", err)
 		}
 	}
 
 	return nil
 }
 
-func (r *File) Get(id string) (models.URL, error) {
+func (r *File) GetURL(ctx context.Context, id string) (models.URL, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	if url, ok := r.cache[id]; ok {
-		return models.URL{ID: id, Original: url}, nil
+	if url, ok := r.urlsCache[id]; ok {
+		return url, nil
 	}
 
 	return models.URL{}, errx.ErrNotFound
 }
 
-func (r *File) PingDB() error {
+func (r *File) GetUserURLs(ctx context.Context, userID uuid.UUID) ([]models.URL, error) {
+	var urls []models.URL
+
+	ids, ok := r.userUrlsCache[userID]
+	if !ok {
+		return urls, nil
+	}
+
+	for id := range ids {
+		urls = append(urls, r.urlsCache[id])
+	}
+
+	return urls, nil
+}
+
+func (r *File) DeleteURLs(ctx context.Context, deletableURLs []models.DeletableURL) {
+	for i, deletableURL := range deletableURLs {
+		select {
+		case <-ctx.Done():
+			logger.Log.Sugar().Warnw("context done", "not deleted urls", deletableURLs[i:])
+			return
+		default:
+			if ids, ok := r.userUrlsCache[deletableURL.CreatorID]; ok {
+				if _, ok := ids[deletableURL.ID]; ok {
+					if url, ok := r.urlsCache[deletableURL.ID]; ok {
+						url.IsDeleted = true
+						r.urlsCache[deletableURL.ID] = url
+						select {
+						case r.queue <- url:
+							continue
+						case <-r.shutdown:
+							logger.Log.Sugar().Warnw("file storage closed", "not deleted urls", deletableURLs[i:])
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+func (r *File) PingDB(ctx context.Context) error {
 	return errors.New("not a db storage")
 }
 
@@ -120,20 +150,25 @@ func (r *File) Close() {
 	r.wg.Wait()
 
 	if err := r.file.Close(); err != nil {
-		logger.Log.Sugar().Errorw("failed to close file", "error", err)
+		logger.Log.Sugar().Errorw("close file", "error", err)
 	}
 }
 
 func (r *File) loadToCache() error {
 	scanner := bufio.NewScanner(r.file)
 
-	var urlEntry models.URL
+	var url models.URL
 	for scanner.Scan() {
-		if err := json.Unmarshal(scanner.Bytes(), &urlEntry); err != nil {
+		if err := json.Unmarshal(scanner.Bytes(), &url); err != nil {
 			return err
 		}
 
-		r.cache[urlEntry.ID] = urlEntry.Original
+		r.urlsCache[url.ID] = url
+		if _, ok := r.userUrlsCache[url.CreatorID]; ok {
+			r.userUrlsCache[url.CreatorID][url.ID] = struct{}{}
+		} else {
+			r.userUrlsCache[url.CreatorID] = map[string]struct{}{url.ID: {}}
+		}
 	}
 
 	return scanner.Err()
@@ -156,16 +191,16 @@ func (r *File) asyncWriter() {
 
 	for {
 		select {
-		case url := <-r.queue:
-			if err := r.saveToFile(url); err != nil {
-				logger.Log.Sugar().Errorw("failed to save to file", "url", url, "error", err)
+		case userURL := <-r.queue:
+			if err := r.saveToFile(userURL); err != nil {
+				logger.Log.Sugar().Errorw("failed to save to file", "userURL", userURL, "error", err)
 			}
 		case <-r.shutdown:
 			for {
 				select {
-				case url := <-r.queue:
-					if err := r.saveToFile(url); err != nil {
-						logger.Log.Sugar().Errorw("failed to save to file", "url", url, "error", err)
+				case userURL := <-r.queue:
+					if err := r.saveToFile(userURL); err != nil {
+						logger.Log.Sugar().Errorw("failed to save to file", "userURL", userURL, "error", err)
 					}
 				default:
 					return
