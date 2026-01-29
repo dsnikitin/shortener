@@ -29,6 +29,6 @@ func main() {
 
 	<-shutdownSignal
 
-	logger.Log.Sugar().Infow("received shutdown signal")
+	logger.Log.Sugar().Infow("Received shutdown signal")
 	app.shutdown()
 }

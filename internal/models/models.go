@@ -36,3 +36,17 @@ type GetUserUrlsResponseItem struct {
 	ShortURL    string `json:"short_url"`
 	OriginalURL string `json:"original_url"`
 }
+
+type Action string
+
+const (
+	Shorten Action = "shorten"
+	Follow  Action = "follow"
+)
+
+type Event struct {
+	Timestamp   int64  `json:"ts"`
+	Action      Action `json:"action"`
+	UserID      string `json:"user_id,omitempty"`
+	OriginalURL string `json:"url"`
+}

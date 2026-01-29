@@ -64,7 +64,7 @@ func (m *Deleter) Stop() {
 	close(m.stopCh)
 	m.wg.Wait()
 
-	logger.Log.Sugar().Info("deletion manager stopped")
+	logger.Log.Sugar().Info("Deletion manager stopped")
 }
 
 func (m *Deleter) DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids []string) error {

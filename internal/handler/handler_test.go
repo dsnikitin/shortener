@@ -58,6 +58,12 @@ func (m *MockService) DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids 
 	return args.Error(0)
 }
 
+type MockAuditor struct {
+	mock.Mock
+}
+
+func (m *MockAuditor) PublishEvent(models.Event) {}
+
 func TestHandler_Shorten(t *testing.T) {
 	userID := uuid.New()
 
@@ -76,7 +82,7 @@ func TestHandler_Shorten(t *testing.T) {
 	}
 
 	s := new(MockService)
-	h := handler.New(cfg.ShortURLBaseAddr, s)
+	h := handler.New(cfg.ShortURLBaseAddr, s, new(MockAuditor))
 
 	r := chi.NewRouter()
 	r.Post("/", h.Shorten)
@@ -185,7 +191,7 @@ func TestHandler_ShortenFromJSON(t *testing.T) {
 	}
 
 	s := new(MockService)
-	h := handler.New(cfg.ShortURLBaseAddr, s)
+	h := handler.New(cfg.ShortURLBaseAddr, s, new(MockAuditor))
 
 	r := chi.NewRouter()
 	r.Post("/api/shorten", h.ShortenFromJSON)
@@ -301,7 +307,7 @@ func TestHandler_Redirect(t *testing.T) {
 	}
 
 	s := new(MockService)
-	h := handler.New(cfg.ShortURLBaseAddr, s)
+	h := handler.New(cfg.ShortURLBaseAddr, s, new(MockAuditor))
 
 	r := chi.NewRouter()
 	r.Get("/{id}", h.Redirect)
@@ -412,7 +418,7 @@ func TestHandler_PingDB(t *testing.T) {
 	}
 
 	s := new(MockService)
-	h := handler.New(cfg.ShortURLBaseAddr, s)
+	h := handler.New(cfg.ShortURLBaseAddr, s, new(MockAuditor))
 
 	r := chi.NewRouter()
 	r.Get("/ping", h.PingDB)
@@ -491,7 +497,7 @@ func TestHandler_ShortenBatch(t *testing.T) {
 	}
 
 	s := new(MockService)
-	h := handler.New(cfg.ShortURLBaseAddr, s)
+	h := handler.New(cfg.ShortURLBaseAddr, s, new(MockAuditor))
 
 	r := chi.NewRouter()
 	r.Post("/api/shorten/batch", h.ShortenBatch)
@@ -644,7 +650,7 @@ func TestHandler_GetUserUrls(t *testing.T) {
 	}
 
 	s := new(MockService)
-	h := handler.New(cfg.ShortURLBaseAddr, s)
+	h := handler.New(cfg.ShortURLBaseAddr, s, new(MockAuditor))
 
 	r := chi.NewRouter()
 	r.Get("/api/user/urls", h.GetUserURLs)

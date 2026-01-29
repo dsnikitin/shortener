@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/dsnikitin/shortener/internal/config"
 	"github.com/dsnikitin/shortener/internal/errx"
@@ -25,15 +26,21 @@ type Service interface {
 	DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids []string) error
 }
 
+type Auditor interface {
+	PublishEvent(event models.Event)
+}
+
 type Handler struct {
 	shortURLBaseAddr string
 	s                Service
+	auditor          Auditor
 }
 
-func New(shortURLBaseAddr string, s Service) *Handler {
+func New(shortURLBaseAddr string, s Service, auditor Auditor) *Handler {
 	return &Handler{
 		shortURLBaseAddr: shortURLBaseAddr,
 		s:                s,
+		auditor:          auditor,
 	}
 }
 
@@ -45,7 +52,7 @@ func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
 
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		logger.Log.Sugar().Errorw("cannot read request text body", "error", err.Error())
+		logger.Log.Sugar().Errorw("Cannot read request text body", "error", err.Error())
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -55,14 +62,14 @@ func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/plain")
+	originalURL := string(bodyBytes)
 	status := http.StatusCreated
 
-	id, err := h.s.CreateID(r.Context(), userID, string(bodyBytes))
+	id, err := h.s.CreateID(r.Context(), userID, originalURL)
 	if err != nil {
 		var aeErr *errx.ErrAlreadyExists
 		if !errors.As(err, &aeErr) {
-			logger.Log.Sugar().Errorw("failed to create id", "error", err.Error())
+			logger.Log.Sugar().Errorw("Failed to create id", "error", err.Error())
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -71,6 +78,14 @@ func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
 		id = aeErr.URL.ID
 	}
 
+	h.auditor.PublishEvent(models.Event{
+		Timestamp:   time.Now().Unix(),
+		Action:      models.Shorten,
+		UserID:      userID.String(),
+		OriginalURL: originalURL,
+	})
+
+	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(status)
 	io.WriteString(w, h.shortURLBaseAddr+"/"+id)
 }
@@ -83,7 +98,7 @@ func (h *Handler) ShortenFromJSON(w http.ResponseWriter, r *http.Request) {
 
 	var req models.ShortenRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		logger.Log.Sugar().Errorw("cannot read request JSON body", "error", err.Error())
+		logger.Log.Sugar().Errorw("Cannot read request JSON body", "error", err.Error())
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -93,14 +108,13 @@ func (h *Handler) ShortenFromJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	status := http.StatusCreated
 
 	id, err := h.s.CreateID(r.Context(), userID, req.URL)
 	if err != nil {
 		var aeErr *errx.ErrAlreadyExists
 		if !errors.As(err, &aeErr) {
-			logger.Log.Sugar().Errorw("failed to create id", "error", err.Error())
+			logger.Log.Sugar().Errorw("Failed to create id", "error", err.Error())
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -109,12 +123,19 @@ func (h *Handler) ShortenFromJSON(w http.ResponseWriter, r *http.Request) {
 		id = aeErr.URL.ID
 	}
 
+	h.auditor.PublishEvent(models.Event{
+		Timestamp:   time.Now().Unix(),
+		Action:      models.Shorten,
+		UserID:      userID.String(),
+		OriginalURL: req.URL,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 
 	resp := models.ShortenResponse{Result: h.shortURLBaseAddr + "/" + id}
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		logger.Log.Sugar().Errorw("encoding shorten response", "error", err)
-		return
+		logger.Log.Sugar().Errorw("Encoding shorten response", "error", err)
 	}
 }
 
@@ -126,7 +147,7 @@ func (h *Handler) ShortenBatch(w http.ResponseWriter, r *http.Request) {
 
 	var req []models.ShortenBatchRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		logger.Log.Sugar().Errorw("cannot read shorten batch request", "error", err.Error())
+		logger.Log.Sugar().Errorw("Cannot read shorten batch request", "error", err.Error())
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -150,7 +171,7 @@ func (h *Handler) ShortenBatch(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var aeErr *errx.ErrAlreadyExists
 		if !errors.As(err, &aeErr) {
-			logger.Log.Sugar().Errorw("failed to create ids", "error", err.Error())
+			logger.Log.Sugar().Errorw("Failed to create ids", "error", err.Error())
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -163,7 +184,7 @@ func (h *Handler) ShortenBatch(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
 		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			logger.Log.Sugar().Errorw("encoding shorten batch response", "error", err)
+			logger.Log.Sugar().Errorw("Encoding shorten batch response", "error", err)
 		}
 		return
 	}
@@ -181,7 +202,7 @@ func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request) {
 	url, err := h.s.GetURL(r.Context(), id)
 	if err != nil {
 		if !errors.Is(err, errx.ErrNotFound) {
-			logger.Log.Sugar().Errorw("failed to get original url", "error", err.Error())
+			logger.Log.Sugar().Errorw("Failed to get original url", "error", err.Error())
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -190,14 +211,18 @@ func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/plain")
+	h.auditor.PublishEvent(models.Event{
+		Timestamp:   time.Now().Unix(),
+		Action:      models.Follow,
+		OriginalURL: url.Original,
+	})
 
+	w.Header().Set("Content-Type", "text/plain")
 	if url.IsDeleted {
 		w.WriteHeader(http.StatusGone)
-		return
+	} else {
+		http.Redirect(w, r, url.Original, http.StatusTemporaryRedirect)
 	}
-
-	http.Redirect(w, r, url.Original, http.StatusTemporaryRedirect)
 }
 
 func (h *Handler) PingDB(w http.ResponseWriter, r *http.Request) {
@@ -218,7 +243,7 @@ func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 
 	urls, err := h.s.GetUserURLs(r.Context(), userID)
 	if err != nil {
-		logger.Log.Sugar().Errorw("failed to get user urls", "userID", userID)
+		logger.Log.Sugar().Errorw("Failed to get user urls", "userID", userID)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -242,7 +267,7 @@ func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		logger.Log.Sugar().Errorw("encoding user urls response", "error", err)
+		logger.Log.Sugar().Errorw("Encoding user urls response", "error", err)
 		return
 	}
 }
@@ -255,7 +280,7 @@ func (h *Handler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
 
 	var ids []string
 	if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
-		logger.Log.Sugar().Errorw("cannot read delete user urls request", "error", err.Error())
+		logger.Log.Sugar().Errorw("Cannot read delete user urls request", "error", err.Error())
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -266,7 +291,7 @@ func (h *Handler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.s.DeleteUserURLs(r.Context(), userID, ids); err != nil {
-		logger.Log.Sugar().Errorw("delete user urls", "error", err.Error())
+		logger.Log.Sugar().Errorw("Delete user urls", "error", err.Error())
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -281,7 +306,7 @@ func (h *Handler) sendBatchResponse(
 	for i := range req {
 		id, ok := ids[req[i].CorrelationID]
 		if !ok {
-			logger.Log.Sugar().Errorw("missing result", "correlationID", req[i].CorrelationID)
+			logger.Log.Sugar().Errorw("Missing result", "correlationID", req[i].CorrelationID)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -295,7 +320,7 @@ func (h *Handler) sendBatchResponse(
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		logger.Log.Sugar().Errorw("encoding shorten batch response", "error", err)
+		logger.Log.Sugar().Errorw("Encoding shorten batch response", "error", err)
 		return
 	}
 }
@@ -304,7 +329,7 @@ func parseUserID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 	strUserID := r.Header.Get("x-user-id")
 	userID, err := uuid.Parse(strUserID)
 	if err != nil {
-		logger.Log.Sugar().Errorw("failed to parse userID to uuid", "userID", strUserID)
+		logger.Log.Sugar().Errorw("Failed to parse userID to uuid", "userID", strUserID)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return uuid.Nil, false
 	}

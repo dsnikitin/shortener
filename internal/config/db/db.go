@@ -10,7 +10,7 @@ import (
 )
 
 type Config struct {
-	DSN string `env:"DATABASE_DSN"`
+	DSN string `env:"DSN"`
 }
 
 func New(cfg *Config) (*pgxpool.Pool, error) {
@@ -26,6 +26,6 @@ func New(cfg *Config) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("ping db: %w", err)
 	}
 
-	logger.Log.Sugar().Infow("successfuly connected to database")
+	logger.Log.Sugar().Infow("Successfuly connected to database")
 	return pool, nil
 }
