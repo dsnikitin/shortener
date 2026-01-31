@@ -85,7 +85,7 @@ func (r *Memory) DeleteURLs(ctx context.Context, deletableURLs []models.Deletabl
 	for i, deletableURL := range deletableURLs {
 		select {
 		case <-ctx.Done():
-			logger.Log.Sugar().Warnw("context done", "not deleted urls", deletableURLs[i:])
+			logger.Log.Warnw("Context done", "not deleted urls", deletableURLs[i:])
 		default:
 			if ids, ok := r.userURLs[deletableURL.CreatorID]; ok {
 				if _, ok := ids[deletableURL.ID]; ok {

@@ -39,7 +39,7 @@ func Logging(h http.Handler) http.Handler {
 
 		h.ServeHTTP(&lw, r)
 
-		logger.Log.Sugar().Infow("request handled",
+		logger.Log.Infow("Request handled",
 			"uri", r.RequestURI,
 			"method", r.Method,
 			"status", lw.res.status,

@@ -31,7 +31,7 @@ func (c *Consumer) Consume(event models.Event) error {
 func (c *Consumer) Stop() {
 	close(c.shutdown)
 	c.eg.Wait()
-	logger.Log.Sugar().Infof("Consumer %s stopped", c.id)
+	logger.Log.Infof("Consumer %s stopped", c.id)
 }
 
 func (c *Consumer) process(fn func(event models.Event) error) error {
@@ -39,14 +39,14 @@ func (c *Consumer) process(fn func(event models.Event) error) error {
 		select {
 		case event := <-c.events:
 			if err := fn(event); err != nil {
-				logger.Log.Sugar().Errorw("Failed to process event", "event", event, "error", err)
+				logger.Log.Errorw("Failed to process event", "event", event, "error", err)
 			}
 		case <-c.shutdown:
 			for {
 				select {
 				case event := <-c.events:
 					if err := fn(event); err != nil {
-						logger.Log.Sugar().Errorw("Failed to process event while shuting down", "event", event, "error", err)
+						logger.Log.Errorw("Failed to process event while shuting down", "event", event, "error", err)
 					}
 				default:
 					return nil

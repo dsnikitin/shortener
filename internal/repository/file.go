@@ -44,7 +44,7 @@ func NewFile(filePath string) (*File, error) {
 
 	if err := r.loadToCache(); err != nil {
 		if closeErr := r.file.Close(); closeErr != nil {
-			logger.Log.Sugar().Errorw("failed to close file", "error", closeErr)
+			logger.Log.Errorw("Failed to close file", "error", closeErr)
 		}
 
 		return nil, err
@@ -120,7 +120,7 @@ func (r *File) DeleteURLs(ctx context.Context, deletableURLs []models.DeletableU
 	for i, deletableURL := range deletableURLs {
 		select {
 		case <-ctx.Done():
-			logger.Log.Sugar().Warnw("context done", "not deleted urls", deletableURLs[i:])
+			logger.Log.Warnw("Context done", "not deleted urls", deletableURLs[i:])
 			return
 		default:
 			if ids, ok := r.userUrlsCache[deletableURL.CreatorID]; ok {
@@ -132,7 +132,7 @@ func (r *File) DeleteURLs(ctx context.Context, deletableURLs []models.DeletableU
 						case r.queue <- url:
 							continue
 						case <-r.shutdown:
-							logger.Log.Sugar().Warnw("file storage closed", "not deleted urls", deletableURLs[i:])
+							logger.Log.Warnw("File storage closed", "not deleted urls", deletableURLs[i:])
 						}
 					}
 				}
@@ -150,7 +150,7 @@ func (r *File) Close() {
 	r.wg.Wait()
 
 	if err := r.file.Close(); err != nil {
-		logger.Log.Sugar().Errorw("close file", "error", err)
+		logger.Log.Errorw("Close file failed", "error", err)
 	}
 }
 
@@ -193,14 +193,14 @@ func (r *File) asyncWriter() {
 		select {
 		case userURL := <-r.queue:
 			if err := r.saveToFile(userURL); err != nil {
-				logger.Log.Sugar().Errorw("failed to save to file", "userURL", userURL, "error", err)
+				logger.Log.Errorw("Failed to save to file", "userURL", userURL, "error", err)
 			}
 		case <-r.shutdown:
 			for {
 				select {
 				case userURL := <-r.queue:
 					if err := r.saveToFile(userURL); err != nil {
-						logger.Log.Sugar().Errorw("failed to save to file", "userURL", userURL, "error", err)
+						logger.Log.Errorw("Failed to save to file", "userURL", userURL, "error", err)
 					}
 				default:
 					return

@@ -32,23 +32,23 @@ type app struct {
 func newApp(cfg *config.Config) *app {
 	pgxPool, err := db.New(cfg.DataBase)
 	if err != nil {
-		logger.Log.Sugar().Infow("Running without connection to database", "cause", err)
+		logger.Log.Infow("Running without connection to database", "cause", err)
 	}
 
 	if pgxPool != nil {
 		if err := applyMigrations(cfg.DataBase); err != nil {
-			logger.Log.Sugar().Fatalw("Failed to apply migrations", "error", err)
+			logger.Log.Fatalw("Failed to apply migrations", "error", err)
 		}
 	}
 
 	storage, err := initStorage(cfg, pgxPool)
 	if err != nil {
-		logger.Log.Sugar().Fatalw("Failed to init storage", "error", err)
+		logger.Log.Fatalw("Failed to init storage", "error", err)
 	}
 
 	auditor, err := initAuditor(cfg.Audit)
 	if err != nil {
-		logger.Log.Sugar().Fatalw("Failed to init auditor", "error", err)
+		logger.Log.Fatalw("Failed to init auditor", "error", err)
 	}
 
 	s := service.New(storage)
@@ -65,9 +65,9 @@ func newApp(cfg *config.Config) *app {
 }
 
 func (a *app) start() {
-	logger.Log.Sugar().Infow("Starting server", "address", a.server.Addr)
+	logger.Log.Infow("Starting server", "address", a.server.Addr)
 	if err := a.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		logger.Log.Sugar().Fatalw("Server starting failed", "error", err)
+		logger.Log.Fatalw("Server starting failed", "error", err)
 	}
 }
 
@@ -79,15 +79,15 @@ func (a *app) shutdown() {
 	defer cancel()
 
 	if err := a.server.Shutdown(ctx); err != nil {
-		logger.Log.Sugar().Errorw("Server gracefull shutdown failed", "error", err)
+		logger.Log.Errorw("Server gracefull shutdown failed", "error", err)
 		return
 	}
 
-	logger.Log.Sugar().Infow("Shutdown successfully completed")
+	logger.Log.Infow("Shutdown successfully completed")
 }
 
 func applyMigrations(cfg *db.Config) error {
-	logger.Log.Sugar().Info("Applying migrations...")
+	logger.Log.Info("Applying migrations...")
 
 	db, err := sql.Open("pgx", cfg.DSN)
 	if err != nil {
@@ -110,7 +110,7 @@ func applyMigrations(cfg *db.Config) error {
 		return fmt.Errorf("up migrations: %w", err)
 	}
 
-	logger.Log.Sugar().Info("Migrations successfully applied")
+	logger.Log.Info("Migrations successfully applied")
 	return nil
 }
 
@@ -129,8 +129,8 @@ func initServer(conf *config.Config, router http.Handler) *http.Server {
 	return &http.Server{
 		Addr:         conf.ServerAddr,
 		Handler:      router,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
+		ReadTimeout:  40 * time.Second,
+		WriteTimeout: 40 * time.Second,
 	}
 }
 
@@ -160,7 +160,7 @@ func initAuditor(cfg *audit.Config) (*auditor.Auditor, error) {
 	}
 
 	if len(consumers) == 0 {
-		logger.Log.Sugar().Info("Starting without audit consumers")
+		logger.Log.Info("Starting without audit consumers")
 	}
 
 	return auditor.New(cfg.EventsLimit, consumers...), nil

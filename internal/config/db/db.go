@@ -26,6 +26,6 @@ func New(cfg *Config) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("ping db: %w", err)
 	}
 
-	logger.Log.Sugar().Infow("Successfuly connected to database")
+	logger.Log.Infow("Successfuly connected to database")
 	return pool, nil
 }

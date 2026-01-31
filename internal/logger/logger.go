@@ -2,7 +2,7 @@ package logger
 
 import "go.uber.org/zap"
 
-var Log *zap.Logger = zap.NewNop()
+var Log = zap.NewNop().Sugar()
 
 func Initialize(level string) error {
 	lvl, err := zap.ParseAtomicLevel(level)
@@ -18,7 +18,7 @@ func Initialize(level string) error {
 		return err
 	}
 
-	Log = zl
+	Log = zl.Sugar()
 
 	return nil
 }

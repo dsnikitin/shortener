@@ -12,7 +12,7 @@ import (
 )
 
 const dbRequestSecondsTimeout = 3
-const flushSecondsInterval = 5
+const flushSecondsInterval = 3
 const batchSize = 100
 const inputWorkers = 5
 
@@ -64,7 +64,7 @@ func (m *Deleter) Stop() {
 	close(m.stopCh)
 	m.wg.Wait()
 
-	logger.Log.Sugar().Info("Deletion manager stopped")
+	logger.Log.Info("Deletion manager stopped")
 }
 
 func (m *Deleter) DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids []string) error {

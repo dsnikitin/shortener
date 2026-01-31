@@ -36,7 +36,7 @@ func New() (*Config, error) {
 	flag.StringVar(&cfg.FileStoragePath, "f", "shortener_storage.json", "file storage path")
 	flag.StringVar(&cfg.DataBase.DSN, "d", "", "database dsn string")
 	flag.StringVar(&cfg.Audit.FilePath, "audit-file", "audit.json", "path to file where audit logs are saved")
-	flag.StringVar(&cfg.Audit.URL, "audit-url", "http://ya.ru", "full URL of remote server where audit logs are sent")
+	flag.StringVar(&cfg.Audit.URL, "audit-url", "", "full URL of remote server where audit logs are sent")
 	flag.IntVar(&cfg.Audit.EventsLimit, "audit-events-limit", 1000, "audit events queue limit")
 	flag.StringVar(&cfg.Audit.FileConsumerID, "audit-consumer-file", "file_consumer", "file consumer id of audit events")
 	flag.StringVar(&cfg.Audit.RemoteConsumerID, "audit-consumer-remote", "remote_consumer", "remote consumer id of audit events")

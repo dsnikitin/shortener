@@ -158,7 +158,7 @@ func (r *Postgres) DeleteURLs(ctx context.Context, urls []models.DeletableURL) {
 	for i := range urls {
 		_, err := br.Exec()
 		if err != nil {
-			logger.Log.Sugar().Errorw("failed to delete url", "ID", urls[i].ID, "error", err)
+			logger.Log.Errorw("Failed to delete url", "ID", urls[i].ID, "error", err)
 		}
 	}
 }

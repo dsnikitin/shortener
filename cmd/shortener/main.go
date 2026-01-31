@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -29,6 +30,6 @@ func main() {
 
 	<-shutdownSignal
 
-	logger.Log.Sugar().Infow("Received shutdown signal")
+	logger.Log.Infow("Received shutdown signal")
 	app.shutdown()
 }
