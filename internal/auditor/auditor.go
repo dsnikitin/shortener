@@ -1,9 +1,10 @@
 package auditor
 
 import (
+	"golang.org/x/sync/errgroup"
+
 	"github.com/dsnikitin/shortener/internal/logger"
 	"github.com/dsnikitin/shortener/internal/models"
-	"golang.org/x/sync/errgroup"
 )
 
 type Consumer interface {

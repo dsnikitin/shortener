@@ -10,15 +10,16 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/dsnikitin/shortener/internal/config"
-	"github.com/dsnikitin/shortener/internal/errx"
-	"github.com/dsnikitin/shortener/internal/handler"
-	"github.com/dsnikitin/shortener/internal/models"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+
+	"github.com/dsnikitin/shortener/internal/config"
+	"github.com/dsnikitin/shortener/internal/errx"
+	"github.com/dsnikitin/shortener/internal/handler"
+	"github.com/dsnikitin/shortener/internal/models"
 )
 
 type MockService struct {

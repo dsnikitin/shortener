@@ -8,11 +8,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/dsnikitin/shortener/internal/config"
 	"github.com/dsnikitin/shortener/internal/errx"
 	"github.com/dsnikitin/shortener/internal/models"
 	"github.com/dsnikitin/shortener/internal/service/deleter"
-	"github.com/google/uuid"
 )
 
 type Repository interface {

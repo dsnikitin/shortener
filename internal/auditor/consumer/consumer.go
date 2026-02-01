@@ -3,9 +3,10 @@ package consumer
 import (
 	"errors"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/dsnikitin/shortener/internal/logger"
 	"github.com/dsnikitin/shortener/internal/models"
-	"golang.org/x/sync/errgroup"
 )
 
 type Consumer struct {

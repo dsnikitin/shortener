@@ -4,6 +4,7 @@ import (
 	"flag"
 
 	"github.com/caarlos0/env"
+
 	"github.com/dsnikitin/shortener/internal/config/audit"
 	"github.com/dsnikitin/shortener/internal/config/db"
 )

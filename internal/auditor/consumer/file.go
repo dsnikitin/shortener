@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"os"
 
-	"github.com/dsnikitin/shortener/internal/models"
 	"github.com/pkg/errors"
+
+	"github.com/dsnikitin/shortener/internal/models"
 )
 
 type File struct {

@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dsnikitin/shortener/internal/logger"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/dsnikitin/shortener/internal/logger"
 )
 
 type Config struct {

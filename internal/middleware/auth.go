@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/dsnikitin/shortener/internal/logger"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
+
+	"github.com/dsnikitin/shortener/internal/logger"
 )
 
 const authCookieName = "auth_token"

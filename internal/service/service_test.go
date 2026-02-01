@@ -6,11 +6,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/mock"
+
 	"github.com/dsnikitin/shortener/internal/errx"
 	"github.com/dsnikitin/shortener/internal/models"
 	"github.com/dsnikitin/shortener/internal/service"
-	"github.com/google/uuid"
-	"github.com/stretchr/testify/mock"
 )
 
 type MockRepository struct {
