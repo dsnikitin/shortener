@@ -33,6 +33,10 @@ func NewRemote(id, url string, eventsLimit int) (*Remote, error) {
 		client: newClient(),
 	}
 
+	if err := c.healthCheck(); err != nil {
+		return nil, errors.Wrap(err, "health check")
+	}
+
 	c.eg.Go(func() error {
 		return c.process(c.consume)
 	})
@@ -40,10 +44,15 @@ func NewRemote(id, url string, eventsLimit int) (*Remote, error) {
 	return c, nil
 }
 
-// HealthCheck выполняет проверку доступности удаленного сервера.
-func (c *Remote) HealthCheck() error {
-	if err := c.sendRequest(http.MethodHead, bytes.NewReader(nil)); err != nil {
-		return errors.Wrap(err, "send request")
+func (c *Remote) healthCheck() error {
+	resp, err := c.client.Head(c.url)
+	if err != nil {
+		return errors.Wrap(err, "do head request")
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return errors.Errorf("server returned error status: %d", resp.StatusCode)
 	}
 
 	return nil
@@ -55,22 +64,9 @@ func (c *Remote) consume(event models.Event) error {
 		return errors.Wrap(err, "marshal event")
 	}
 
-	if err := c.sendRequest(http.MethodPost, bytes.NewReader(data)); err != nil {
-		return errors.Wrap(err, "send event to remote consumer")
-	}
-
-	return nil
-}
-
-func (c *Remote) sendRequest(method string, body *bytes.Reader) error {
-	req, err := http.NewRequest(method, c.url, body)
+	resp, err := c.client.Post(c.url, "application/json", bytes.NewReader(data))
 	if err != nil {
-		return errors.Wrap(err, "create health check request")
-	}
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return errors.Wrap(err, "health check request failed")
+		return errors.Wrap(err, "do post request")
 	}
 	defer resp.Body.Close()
 

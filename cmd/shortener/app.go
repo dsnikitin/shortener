@@ -144,6 +144,7 @@ func initAuditor(cfg *audit.Config) (*auditor.Auditor, error) {
 			return nil, fmt.Errorf("init file audit consumer: %w", err)
 		}
 
+		logger.Log.Infof("Comsumer %s started", fileConsumer.GetID())
 		consumers = append(consumers, fileConsumer)
 	}
 
@@ -153,10 +154,7 @@ func initAuditor(cfg *audit.Config) (*auditor.Auditor, error) {
 			return nil, fmt.Errorf("init remote audit consumer: %w", err)
 		}
 
-		if err := remoteConsumer.HealthCheck(); err != nil {
-			return nil, fmt.Errorf("healthcheck remote audit consumer: %w", err)
-		}
-
+		logger.Log.Infof("Comsumer %s started", remoteConsumer.GetID())
 		consumers = append(consumers, remoteConsumer)
 	}
 
