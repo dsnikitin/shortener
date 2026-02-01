@@ -36,11 +36,13 @@ var bufWriterPool = sync.Pool{
 	},
 }
 
+// compressWriter обертка для ResponseWriter с поддержкой gzip сжатия.
 type compressWriter struct {
 	http.ResponseWriter
 	gzw *gzip.Writer
 }
 
+// newCompressWriter создает новый compressWriter.
 func newCompressWriter(rw http.ResponseWriter) *compressWriter {
 	gzw := writerPool.Get().(*gzip.Writer)
 	gzw.Reset(rw)
@@ -51,10 +53,12 @@ func newCompressWriter(rw http.ResponseWriter) *compressWriter {
 	}
 }
 
+// Write записывает данные со сжатием gzip.
 func (cw *compressWriter) Write(p []byte) (int, error) {
 	return cw.gzw.Write(p)
 }
 
+// Close закрывает gzip writer и возвращает его в пул.
 func (cw *compressWriter) Close() error {
 	err := cw.gzw.Close()
 	if err == nil {
@@ -64,10 +68,12 @@ func (cw *compressWriter) Close() error {
 	return err
 }
 
+// compressReader обертка для чтения сжатых gzip данных.
 type compressReader struct {
 	gzr *gzip.Reader
 }
 
+// newCompressReader создает новый compressReader.
 func newCompressReader(rc io.ReadCloser) (*compressReader, error) {
 	gzr := readerPool.Get().(*gzip.Reader)
 
@@ -79,10 +85,12 @@ func newCompressReader(rc io.ReadCloser) (*compressReader, error) {
 	return &compressReader{gzr: gzr}, nil
 }
 
+// Read читает распакованные данные.
 func (cr *compressReader) Read(p []byte) (n int, err error) {
 	return cr.gzr.Read(p)
 }
 
+// Close закрывает gzip reader и возвращает его в пул.
 func (cr *compressReader) Close() error {
 	err := cr.gzr.Close()
 	if err == nil {
@@ -92,18 +100,21 @@ func (cr *compressReader) Close() error {
 	return err
 }
 
+// bufferWriter буферизует ответ для проверки размера перед сжатием.
 type bufferWriter struct {
 	http.ResponseWriter
 	buf  []byte
 	code int
 }
 
+// getBufferWriter получает bufferWriter из пула.
 func getBufferWriter(w http.ResponseWriter) *bufferWriter {
 	bw := bufWriterPool.Get().(*bufferWriter)
 	bw.ResponseWriter = w
 	return bw
 }
 
+// putBufferWriter возвращает bufferWriter в пул.
 func putBufferWriter(bw *bufferWriter) {
 	bw.buf = bw.buf[:0]
 	if cap(bw.buf) > maxBufferCap {
@@ -114,16 +125,19 @@ func putBufferWriter(bw *bufferWriter) {
 	bufWriterPool.Put(bw)
 }
 
+// Header возвращает заголовки ответа.
 func (bw *bufferWriter) Header() http.Header {
 	return bw.ResponseWriter.Header()
 }
 
+// WriteHeader сохраняет код статуса ответа.
 func (bw *bufferWriter) WriteHeader(statusCode int) {
 	if bw.code == 0 {
 		bw.code = statusCode
 	}
 }
 
+// Write буферизует данные ответа.
 func (bw *bufferWriter) Write(p []byte) (int, error) {
 	if bw.code == 0 {
 		bw.WriteHeader(http.StatusOK)
@@ -134,6 +148,7 @@ func (bw *bufferWriter) Write(p []byte) (int, error) {
 	return n, nil
 }
 
+// GzipCompress middleware для сжатия gzip запросов и ответов.
 func GzipCompress(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		contentEncoding := r.Header.Values("Content-Encoding")
@@ -168,7 +183,7 @@ func GzipCompress(h http.Handler) http.Handler {
 			return
 		}
 
-		// Клиент поддерживает сжатие и ответ большой
+		// клиент поддерживает сжатие и ответ большой
 		cw := newCompressWriter(w)
 		defer cw.Close()
 
@@ -178,6 +193,7 @@ func GzipCompress(h http.Handler) http.Handler {
 	})
 }
 
+// write записывает данные в ResponseWriter с указанным кодом статуса.
 func write(w http.ResponseWriter, data []byte, statusCode int) {
 	w.WriteHeader(statusCode)
 	if n, err := w.Write(data); err != nil {

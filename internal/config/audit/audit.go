@@ -1,5 +1,6 @@
 package audit
 
+// Config содержит конфигурационные параметры для аудита.
 type Config struct {
 	FilePath         string `env:"FILE"`
 	URL              string `env:"URL"`

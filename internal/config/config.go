@@ -10,11 +10,15 @@ import (
 )
 
 const (
+	// IDMaxLength максимальная длина короткой ссылки.
 	IDMaxLength               int   = 8
+	// OriginalURLMaxLength максимальная длина оригинального URL.
 	OriginalURLMaxLength      int64 = 2048
+	// OriginalURLMaxBatchLength максимальная общая длина оригинальных URL в батче.
 	OriginalURLMaxBatchLength int64 = 2048000
 )
 
+// Config содержит конфигурацию приложения.
 type Config struct {
 	ServerAddr       string        `env:"SERVER_ADDRESS"`
 	ShortURLBaseAddr string        `env:"BASE_URL"`
@@ -25,6 +29,7 @@ type Config struct {
 	Audit            *audit.Config `envPrefix:"AUDIT_"`
 }
 
+// New создает и инициализирует конфигурацию приложения.
 func New() (*Config, error) {
 	cfg := &Config{
 		DataBase: &db.Config{},

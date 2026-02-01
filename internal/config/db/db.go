@@ -10,10 +10,12 @@ import (
 	"github.com/dsnikitin/shortener/internal/logger"
 )
 
+// Config содержит конфигурацию подключения к базе данных.
 type Config struct {
 	DSN string `env:"DSN"`
 }
 
+// New создает пул соединений с базой данных PostgreSQL.
 func New(cfg *Config) (*pgxpool.Pool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

@@ -16,6 +16,7 @@ import (
 	"github.com/dsnikitin/shortener/internal/service/deleter"
 )
 
+// Repository определяет интерфейс репозитория для работы с URL.
 type Repository interface {
 	PingDB(ctx context.Context) error
 	Save(ctx context.Context, url models.URL) error
@@ -26,17 +27,20 @@ type Repository interface {
 	Close()
 }
 
+// URLDeleter определяет интерфейс менеджера удаления URL.
 type URLDeleter interface {
 	DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids []string) error
 	Run()
 	Stop()
 }
 
+// Service представляет сервис сокращения ссылок.
 type Service struct {
 	r Repository
 	d URLDeleter
 }
 
+// New создает новый сервис сокращения ссылок.
 func New(r Repository) *Service {
 	s := &Service{
 		r: r,
@@ -48,6 +52,7 @@ func New(r Repository) *Service {
 	return s
 }
 
+// CreateID создает короткую ссылку для указанного originalURL.
 func (s *Service) CreateID(ctx context.Context, userID uuid.UUID, originalURL string) (string, error) {
 	url := models.URL{
 		ID:        generateID(originalURL),
@@ -70,6 +75,7 @@ func (s *Service) CreateID(ctx context.Context, userID uuid.UUID, originalURL st
 	return url.ID, nil
 }
 
+// CreateIDs создает несколько коротких ссылок для переданных originalURLs.
 func (s *Service) CreateIDs(ctx context.Context, userID uuid.UUID, req map[string]string) (map[string]string, error) {
 	result := make(map[string]string, len(req))
 	urls := make([]models.URL, 0, len(req))
@@ -112,22 +118,27 @@ func (s *Service) CreateIDs(ctx context.Context, userID uuid.UUID, req map[strin
 	return result, nil
 }
 
+// GetURL возвращает оригинальный URL по его короткой ссылке.
 func (s *Service) GetURL(ctx context.Context, id string) (models.URL, error) {
 	return s.r.GetURL(ctx, id)
 }
 
+// PingDB проверяет соединение с базой данных.
 func (s *Service) PingDB(ctx context.Context) error {
 	return s.r.PingDB(ctx)
 }
 
+// GetUserURLs возвращает все URLs пользователя.
 func (s *Service) GetUserURLs(ctx context.Context, userID uuid.UUID) ([]models.URL, error) {
 	return s.r.GetUserURLs(ctx, userID)
 }
 
+// DeleteUserURLs помечает указанные URLs пользователя как удаленные.
 func (s *Service) DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids []string) error {
 	return s.d.DeleteUserURLs(ctx, userID, ids)
 }
 
+// Stop останавливает сервис и освобождает ресурсы.
 func (s *Service) Stop() {
 	s.d.Stop()
 	s.r.Close()

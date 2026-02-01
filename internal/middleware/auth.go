@@ -13,11 +13,13 @@ import (
 
 const authCookieName = "auth_token"
 
+// Claims представляет JWT claims с информацией о пользователе.
 type Claims struct {
 	jwt.RegisteredClaims
 	UserID uuid.UUID
 }
 
+// Auth middleware для аутентификации пользователей с помощью JWT.
 func Auth(JWTSigningKey string) func(h http.Handler) http.Handler {
 	return func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

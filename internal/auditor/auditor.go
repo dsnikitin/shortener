@@ -7,12 +7,14 @@ import (
 	"github.com/dsnikitin/shortener/internal/models"
 )
 
+// Consumer определяет интерфейс потребителя событий.
 type Consumer interface {
 	GetID() string
 	Consume(event models.Event) error
 	Stop()
 }
 
+// Auditor представляет аудитора событий, который отправляет события зарегистрированным потребителям.
 type Auditor struct {
 	consumers map[string]Consumer
 
@@ -21,6 +23,9 @@ type Auditor struct {
 	shutdown    chan struct{}
 }
 
+// New создает нового аудитора событий.
+// eventsLimit - максимальный размер очереди входящих событий,
+// consumers - список потребителей для регистрации.
 func New(eventsLimit int, consumers ...Consumer) *Auditor {
 	a := &Auditor{
 		inputEvents: make(chan models.Event, eventsLimit),
@@ -37,6 +42,8 @@ func New(eventsLimit int, consumers ...Consumer) *Auditor {
 	return a
 }
 
+// PublishEvent публикует событие для обработки зарегистрированными потребителями.
+// Если очередь заполнена, то событие отбрасывается с предупреждением в лог.
 func (a *Auditor) PublishEvent(event models.Event) {
 	select {
 	case a.inputEvents <- event:
@@ -45,6 +52,7 @@ func (a *Auditor) PublishEvent(event models.Event) {
 	}
 }
 
+// Stop останавливает аудитора и всех зарегистрированных потребителей.
 func (a *Auditor) Stop() {
 	close(a.shutdown)
 	for _, c := range a.consumers {

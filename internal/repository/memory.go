@@ -13,12 +13,14 @@ import (
 	"github.com/dsnikitin/shortener/internal/models"
 )
 
+// Memory представляет хранилище URL в памяти.
 type Memory struct {
 	mu       sync.RWMutex
 	urls     map[string]models.URL
 	userURLs map[uuid.UUID]map[string]struct{}
 }
 
+// NewMemory создает новое хранилище в памяти.
 func NewMemory() *Memory {
 	return &Memory{
 		mu:       sync.RWMutex{},
@@ -27,6 +29,7 @@ func NewMemory() *Memory {
 	}
 }
 
+// Save сохраняет URL в памяти.
 func (r *Memory) Save(ctx context.Context, url models.URL) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -46,6 +49,7 @@ func (r *Memory) Save(ctx context.Context, url models.URL) error {
 	return nil
 }
 
+// SaveMany сохраняет несколько URLs в памяти.
 func (r *Memory) SaveMany(ctx context.Context, urls []models.URL) error {
 	for i := range urls {
 		if err := r.Save(ctx, urls[i]); err != nil {
@@ -56,6 +60,7 @@ func (r *Memory) SaveMany(ctx context.Context, urls []models.URL) error {
 	return nil
 }
 
+// GetURL возвращает URL по его короткой ссылке.
 func (r *Memory) GetURL(ctx context.Context, id string) (models.URL, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -67,6 +72,7 @@ func (r *Memory) GetURL(ctx context.Context, id string) (models.URL, error) {
 	return models.URL{}, errx.ErrNotFound
 }
 
+// GetUserURLs возвращает все URLs пользователя.
 func (r *Memory) GetUserURLs(ctx context.Context, userID uuid.UUID) ([]models.URL, error) {
 	var res []models.URL
 
@@ -82,6 +88,7 @@ func (r *Memory) GetUserURLs(ctx context.Context, userID uuid.UUID) ([]models.UR
 	return res, nil
 }
 
+// DeleteURLs помечает URLs как удаленные.
 func (r *Memory) DeleteURLs(ctx context.Context, deletableURLs []models.DeletableURL) {
 	for i, deletableURL := range deletableURLs {
 		select {
@@ -100,8 +107,10 @@ func (r *Memory) DeleteURLs(ctx context.Context, deletableURLs []models.Deletabl
 	}
 }
 
+// PingDB проверяет соединение с хранилищем (не реализовано для хранилища в памяти).
 func (r *Memory) PingDB(ctx context.Context) error {
 	return errors.New("not a db storage")
 }
 
+// Close закрывает хранилище в памяти.
 func (r *Memory) Close() {}

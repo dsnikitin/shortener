@@ -18,6 +18,7 @@ import (
 	"github.com/dsnikitin/shortener/internal/models"
 )
 
+// Service определяет интерфейс сервиса сокращения ссылок.
 type Service interface {
 	CreateID(ctx context.Context, userID uuid.UUID, url string) (string, error)
 	CreateIDs(ctx context.Context, userID uuid.UUID, req map[string]string) (map[string]string, error)
@@ -27,16 +28,19 @@ type Service interface {
 	DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids []string) error
 }
 
+// Auditor определяет интерфейс аудитора событий.
 type Auditor interface {
 	PublishEvent(event models.Event)
 }
 
+// Handler представляет HTTP обработчики сервиса сокращения ссылок.
 type Handler struct {
 	shortURLBaseAddr string
 	s                Service
 	auditor          Auditor
 }
 
+// New создает новый экземпляр Handler.
 func New(shortURLBaseAddr string, s Service, auditor Auditor) *Handler {
 	return &Handler{
 		shortURLBaseAddr: shortURLBaseAddr,
@@ -45,6 +49,9 @@ func New(shortURLBaseAddr string, s Service, auditor Auditor) *Handler {
 	}
 }
 
+// Shorten обрабатывает запрос на создание короткого URL из текстового тела.
+// Ожидает plain text в теле запроса, возвращает короткий URL в текстовом виде.
+// При успехе возвращает статус 201 Created или 409 Conflict, если URL уже существует.
 func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
 	userID, ok := parseUserID(w, r)
 	if !ok {
@@ -91,6 +98,9 @@ func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, h.shortURLBaseAddr+"/"+id)
 }
 
+// ShortenFromJSON обрабатывает запрос на создание короткого URL из JSON.
+// Ожидает JSON тело вида {"url": "..."}. Возвращает JSON ответ вида {"result": "..."} с коротким URL.
+// При успехе возвращает статус 201 Created или 409 Conflict, если URL уже существует.
 func (h *Handler) ShortenFromJSON(w http.ResponseWriter, r *http.Request) {
 	userID, ok := parseUserID(w, r)
 	if !ok {
@@ -140,6 +150,10 @@ func (h *Handler) ShortenFromJSON(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ShortenBatch обрабатывает пакетный запрос на создание коротких URL.
+// Ожидает JSON массив объектов {"correlation_id": "...", "original_url": "..."}.
+// Возвращает массив объектов {"correlation_id": "...", "short_url": "..."}.
+// При успехе возвращает статус 201 Created или 409 Conflict, если какой-либо URL уже существует.
 func (h *Handler) ShortenBatch(w http.ResponseWriter, r *http.Request) {
 	userID, ok := parseUserID(w, r)
 	if !ok {
@@ -193,6 +207,9 @@ func (h *Handler) ShortenBatch(w http.ResponseWriter, r *http.Request) {
 	h.sendBatchResponse(w, req, ids)
 }
 
+// Redirect обрабатывает запрос по короткой сслыке и выполняет редирект на оригинальный URL.
+// Если URL помечен как удаленный, возвращает статус 410 Gone.
+// В противном случае выполняет временный редирект 307.
 func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if id == "" || len(id) > config.IDMaxLength {
@@ -226,6 +243,8 @@ func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// PingDB проверяет доступность базы данных и возвращает статус 200 OK при успехе.
+// При ошибке возвращает статус 500 Internal Server Error.
 func (h *Handler) PingDB(w http.ResponseWriter, r *http.Request) {
 	if err := h.s.PingDB(r.Context()); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -236,6 +255,9 @@ func (h *Handler) PingDB(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// GetUserURLs возвращает список всех неудаленных URL пользователя.
+// Возвращает JSON массив объектов  {"short_url": "...", "original_url": "..."}.
+// Если ни одного URL нет, возвращает статус 204 No Content.
 func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	userID, ok := parseUserID(w, r)
 	if !ok {
@@ -273,6 +295,8 @@ func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// DeleteUserURLs обрабатывает запрос на пометку как удаленные URLs пользователя.
+// Ожидает JSON массив коротких ссылок. Возвращает статус 202 Accepted при успехе.
 func (h *Handler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
 	userID, ok := parseUserID(w, r)
 	if !ok {

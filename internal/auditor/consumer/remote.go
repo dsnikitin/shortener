@@ -11,12 +11,17 @@ import (
 	"github.com/dsnikitin/shortener/internal/models"
 )
 
+// Remote представляет удаленного потребителя событий, который отправляет события по HTTP.
 type Remote struct {
 	Consumer
 	url    string
 	client *http.Client
 }
 
+// NewRemote создает нового удаленного потребителя событий.
+// id - идентификатор потребителя,
+// url - URL удаленного сервера,
+// eventsLimit - максимальный размер очереди событий.
 func NewRemote(id, url string, eventsLimit int) (*Remote, error) {
 	c := &Remote{
 		Consumer: Consumer{
@@ -35,6 +40,7 @@ func NewRemote(id, url string, eventsLimit int) (*Remote, error) {
 	return c, nil
 }
 
+// HealthCheck выполняет проверку доступности удаленного сервера.
 func (c *Remote) HealthCheck() error {
 	if err := c.sendRequest(http.MethodHead, bytes.NewReader(nil)); err != nil {
 		return errors.Wrap(err, "send request")

@@ -14,14 +14,17 @@ import (
 	"github.com/dsnikitin/shortener/internal/models"
 )
 
+// Postgres представляет PostgreSQL хранилище для URL.
 type Postgres struct {
 	db *pgxpool.Pool
 }
 
+// NewPostgres создает новое PostgreSQL хранилище.
 func NewPostgres(db *pgxpool.Pool) *Postgres {
 	return &Postgres{db: db}
 }
 
+// PingDB проверяет соединение с базой данных PostgreSQL.
 func (r *Postgres) PingDB(ctx context.Context) error {
 	return r.db.Ping(ctx)
 }
@@ -32,6 +35,7 @@ const getSQL = `
 	WHERE id = @id
 `
 
+// GetURL возвращает URL по его короткой ссылке.
 func (r *Postgres) GetURL(ctx context.Context, id string) (models.URL, error) {
 	row := r.db.QueryRow(ctx, getSQL, pgx.NamedArgs{"id": id})
 
@@ -49,6 +53,7 @@ const saveSQL = `
 	ON CONFLICT DO NOTHING
 `
 
+// Save сохраняет URL в PostgreSQL.
 func (r *Postgres) Save(ctx context.Context, url models.URL) error {
 	res, err := r.db.Exec(
 		ctx, saveSQL, pgx.NamedArgs{"id": url.ID, "original": url.Original, "creatorID": url.CreatorID})
@@ -63,6 +68,7 @@ func (r *Postgres) Save(ctx context.Context, url models.URL) error {
 	return nil
 }
 
+// SaveMany сохраняет несколько URLs в PostgreSQL.
 func (r *Postgres) SaveMany(ctx context.Context, urls []models.URL) error {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
@@ -112,6 +118,7 @@ const getUserURLsSQL = `
 	WHERE creator_id = @creatorID
 `
 
+// GetUserURLs возвращает все URLs пользователя из PostgreSQL.
 func (r *Postgres) GetUserURLs(ctx context.Context, userID uuid.UUID) ([]models.URL, error) {
 	rows, err := r.db.Query(ctx, getUserURLsSQL, pgx.NamedArgs{"creatorID": userID})
 	if err != nil {
@@ -142,6 +149,7 @@ const deleteUserURLsSQL = `
 	WHERE id = @id AND creator_id = @creatorID
 `
 
+// DeleteURLs помечает URLs как удаленные в PostgreSQL.
 func (r *Postgres) DeleteURLs(ctx context.Context, urls []models.DeletableURL) {
 	batch := &pgx.Batch{}
 	for i := range urls {
@@ -164,6 +172,7 @@ func (r *Postgres) DeleteURLs(ctx context.Context, urls []models.DeletableURL) {
 	}
 }
 
+// Close закрывает соединение с PostgreSQL.
 func (r *Postgres) Close() {
 	r.db.Close()
 }

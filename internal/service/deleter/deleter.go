@@ -17,10 +17,12 @@ const flushSecondsInterval = 3
 const batchSize = 100
 const inputWorkers = 5
 
+// Repository определяет интерфейс репозитория для удаления URL.
 type Repository interface {
 	DeleteURLs(ctx context.Context, data []models.DeletableURL)
 }
 
+// Deleter представляет менеджер для асинхронного удаления URL.
 type Deleter struct {
 	r Repository
 
@@ -35,6 +37,7 @@ type Deleter struct {
 	flushCh chan struct{}
 }
 
+// New создает новый менеджер удаления URL.
 func New(r Repository) *Deleter {
 	m := &Deleter{
 		r:        r,
@@ -48,6 +51,7 @@ func New(r Repository) *Deleter {
 	return m
 }
 
+// Run запускает менеджер удаления URL.
 func (m *Deleter) Run() {
 	for range inputWorkers {
 		m.wg.Add(1)
@@ -61,6 +65,7 @@ func (m *Deleter) Run() {
 	go m.writer()
 }
 
+// Stop останавливает менеджер удаления URL.
 func (m *Deleter) Stop() {
 	close(m.stopCh)
 	m.wg.Wait()
@@ -68,6 +73,7 @@ func (m *Deleter) Stop() {
 	logger.Log.Info("Deletion manager stopped")
 }
 
+// DeleteUserURLs добавляет URLs для удаления.
 func (m *Deleter) DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids []string) error {
 	for _, id := range ids {
 		select {
