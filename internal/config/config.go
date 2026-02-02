@@ -11,9 +11,9 @@ import (
 
 const (
 	// IDMaxLength максимальная длина короткой ссылки.
-	IDMaxLength               int   = 8
+	IDMaxLength int = 8
 	// OriginalURLMaxLength максимальная длина оригинального URL.
-	OriginalURLMaxLength      int64 = 2048
+	OriginalURLMaxLength int64 = 2048
 	// OriginalURLMaxBatchLength максимальная общая длина оригинальных URL в батче.
 	OriginalURLMaxBatchLength int64 = 2048000
 )
