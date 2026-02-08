@@ -33,7 +33,9 @@ func initChiRouter(cfg *config.Config, h *handler.Handler) *chi.Mux {
 			Delete("/user/urls", http.HandlerFunc(h.DeleteUserURLs))
 	})
 
-	r.Mount("/debug", chimiddleware.Profiler())
+	if cfg.IsDevelop {
+		r.Mount("/debug", chimiddleware.Profiler())
+	}
 
 	return r
 }

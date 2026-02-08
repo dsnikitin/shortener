@@ -5,6 +5,7 @@ go 1.24.8
 require (
 	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/stretchr/testify v1.11.1
+	golang.org/x/sync v0.13.0
 )
 
 require (
@@ -24,7 +25,6 @@ require (
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
 	golang.org/x/crypto v0.37.0 // indirect
-	golang.org/x/sync v0.13.0 // indirect
 	golang.org/x/text v0.24.0 // indirect
 )
 

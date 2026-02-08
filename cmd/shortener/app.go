@@ -22,12 +22,14 @@ import (
 	"github.com/dsnikitin/shortener/internal/logger"
 	"github.com/dsnikitin/shortener/internal/repository"
 	"github.com/dsnikitin/shortener/internal/service"
+	"github.com/dsnikitin/shortener/internal/service/deleter"
 )
 
 type app struct {
-	server  *http.Server
-	service *service.Service
-	auditor *auditor.Auditor
+	server     *http.Server
+	service    *service.Service
+	urlDeleter *deleter.Deleter
+	auditor    *auditor.Auditor
 }
 
 func newApp(cfg *config.Config) *app {
@@ -47,21 +49,24 @@ func newApp(cfg *config.Config) *app {
 		logger.Log.Fatalw("Failed to init storage", "error", err)
 	}
 
+	urlDeleter := deleter.New(storage)
+
 	auditor, err := initAuditor(cfg.Audit)
 	if err != nil {
 		logger.Log.Fatalw("Failed to init auditor", "error", err)
 	}
 
-	s := service.New(storage)
+	s := service.New(storage, urlDeleter)
 	h := handler.New(cfg.ShortURLBaseAddr, s, auditor)
 
 	router := initChiRouter(cfg, h)
 	server := initServer(cfg, router)
 
 	return &app{
-		server:  server,
-		service: s,
-		auditor: auditor,
+		server:     server,
+		service:    s,
+		urlDeleter: urlDeleter,
+		auditor:    auditor,
 	}
 }
 
@@ -74,13 +79,14 @@ func (a *app) start() {
 
 func (a *app) shutdown() {
 	a.service.Stop()
+	a.urlDeleter.Stop()
 	a.auditor.Stop()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := a.server.Shutdown(ctx); err != nil {
-		logger.Log.Errorw("Server gracefull shutdown failed", "error", err)
+		logger.Log.Errorw("Server graceful shutdown failed", "error", err)
 		return
 	}
 
@@ -144,7 +150,7 @@ func initAuditor(cfg *audit.Config) (*auditor.Auditor, error) {
 			return nil, fmt.Errorf("init file audit consumer: %w", err)
 		}
 
-		logger.Log.Infof("Comsumer %s started", fileConsumer.GetID())
+		logger.Log.Infof("Consumer %s started", fileConsumer.GetID())
 		consumers = append(consumers, fileConsumer)
 	}
 
@@ -154,7 +160,7 @@ func initAuditor(cfg *audit.Config) (*auditor.Auditor, error) {
 			return nil, fmt.Errorf("init remote audit consumer: %w", err)
 		}
 
-		logger.Log.Infof("Comsumer %s started", remoteConsumer.GetID())
+		logger.Log.Infof("Consumer %s started", remoteConsumer.GetID())
 		consumers = append(consumers, remoteConsumer)
 	}
 

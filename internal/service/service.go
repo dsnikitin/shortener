@@ -13,7 +13,6 @@ import (
 	"github.com/dsnikitin/shortener/internal/config"
 	"github.com/dsnikitin/shortener/internal/errx"
 	"github.com/dsnikitin/shortener/internal/models"
-	"github.com/dsnikitin/shortener/internal/service/deleter"
 )
 
 // Repository определяет интерфейс репозитория для работы с URL.
@@ -30,8 +29,6 @@ type Repository interface {
 // URLDeleter определяет интерфейс менеджера удаления URL.
 type URLDeleter interface {
 	DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids []string) error
-	Run()
-	Stop()
 }
 
 // Service представляет сервис сокращения ссылок.
@@ -41,15 +38,8 @@ type Service struct {
 }
 
 // New создает новый сервис сокращения ссылок.
-func New(r Repository) *Service {
-	s := &Service{
-		r: r,
-		d: deleter.New(r),
-	}
-
-	s.d.Run()
-
-	return s
+func New(r Repository, d URLDeleter) *Service {
+	return &Service{r: r, d: d}
 }
 
 // CreateID создает короткую ссылку для указанного originalURL.
@@ -140,7 +130,6 @@ func (s *Service) DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids []st
 
 // Stop останавливает сервис и освобождает ресурсы.
 func (s *Service) Stop() {
-	s.d.Stop()
 	s.r.Close()
 }
 

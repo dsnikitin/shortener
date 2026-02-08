@@ -6,6 +6,7 @@ import (
 
 	"github.com/pkg/errors"
 
+	"github.com/dsnikitin/shortener/internal/logger"
 	"github.com/dsnikitin/shortener/internal/models"
 )
 
@@ -35,6 +36,12 @@ func NewFile(id, path string, eventsLimit int) (*File, error) {
 	}
 
 	c.eg.Go(func() error {
+		defer func() {
+			if err := c.file.Close(); err != nil {
+				logger.Log.Errorw("Failed to close file", "filePath", path, "error", err)
+			}
+		}()
+
 		return c.process(c.consume)
 	})
 

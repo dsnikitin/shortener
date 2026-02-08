@@ -48,11 +48,13 @@ func New(r Repository) *Deleter {
 		flushCh:  make(chan struct{}, 1),
 	}
 
+	m.run()
+
 	return m
 }
 
 // Run запускает менеджер удаления URL.
-func (m *Deleter) Run() {
+func (m *Deleter) run() {
 	for range inputWorkers {
 		m.wg.Add(1)
 		go m.inputWorker()
@@ -70,7 +72,7 @@ func (m *Deleter) Stop() {
 	close(m.stopCh)
 	m.wg.Wait()
 
-	logger.Log.Info("Deletion manager stopped")
+	logger.Log.Info("URL deleter stopped")
 }
 
 // DeleteUserURLs добавляет URLs для удаления.

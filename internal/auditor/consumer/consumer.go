@@ -29,7 +29,7 @@ func (c *Consumer) Consume(event models.Event) error {
 	case c.events <- event:
 		return nil
 	default:
-		return errors.New("events queue if full")
+		return errors.New("events queue is full")
 	}
 }
 

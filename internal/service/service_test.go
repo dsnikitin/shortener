@@ -34,6 +34,14 @@ func (m *MockRepository) SaveMany(ctx context.Context, urls []models.URL) error 
 func (m *MockRepository) DeleteURLs(ctx context.Context, data []models.DeletableURL) {}
 func (m *MockRepository) Close()                                                     {}
 
+type MockURLDeleter struct {
+	mock.Mock
+}
+
+func (m *MockURLDeleter) DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids []string) error {
+	return nil
+}
+
 const (
 	baseURL    = "https://example.com/"
 	pathLength = 200
@@ -50,7 +58,10 @@ func BenchmarkCreateIDs(b *testing.B) {
 		r := new(MockRepository)
 		r.On("SaveMany").Return(nil).Once()
 
-		s := service.New(r)
+		d := new(MockURLDeleter)
+		d.On("DeleteUserURLs").Return(nil).Once()
+
+		s := service.New(r, d)
 
 		b.StartTimer()
 		s.CreateIDs(b.Context(), userID, req)
@@ -70,7 +81,10 @@ func BenchmarkCreateIDs(b *testing.B) {
 		r := new(MockRepository)
 		r.On("SaveMany").Return(err).Once()
 
-		s := service.New(r)
+		d := new(MockURLDeleter)
+		d.On("DeleteUserURLs").Return(nil).Once()
+
+		s := service.New(r, d)
 
 		b.StartTimer()
 		s.CreateIDs(b.Context(), userID, req)
