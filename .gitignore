@@ -24,3 +24,4 @@ vendor/
 
 cmd/client/
 shortener_storage.json
+audit.json

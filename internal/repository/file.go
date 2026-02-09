@@ -9,14 +9,16 @@ import (
 	"os"
 	"sync"
 
+	"github.com/google/uuid"
+
 	"github.com/dsnikitin/shortener/internal/errx"
 	"github.com/dsnikitin/shortener/internal/logger"
 	"github.com/dsnikitin/shortener/internal/models"
-	"github.com/google/uuid"
 )
 
 const queueSize int = 1000
 
+// File представляет файловое хранилище URL.
 type File struct {
 	mu            sync.RWMutex
 	urlsCache     map[string]models.URL
@@ -27,6 +29,7 @@ type File struct {
 	wg            sync.WaitGroup
 }
 
+// NewFile создает новое файловое хранилище.
 func NewFile(filePath string) (*File, error) {
 	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
@@ -44,7 +47,7 @@ func NewFile(filePath string) (*File, error) {
 
 	if err := r.loadToCache(); err != nil {
 		if closeErr := r.file.Close(); closeErr != nil {
-			logger.Log.Sugar().Errorw("failed to close file", "error", closeErr)
+			logger.Log.Errorw("Failed to close file", "error", closeErr)
 		}
 
 		return nil, err
@@ -56,6 +59,7 @@ func NewFile(filePath string) (*File, error) {
 	return r, nil
 }
 
+// Save сохраняет URL в файловом хранилище.
 func (r *File) Save(ctx context.Context, url models.URL) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -80,6 +84,7 @@ func (r *File) Save(ctx context.Context, url models.URL) error {
 	}
 }
 
+// SaveMany сохраняет несколько URLs в файловом хранилище.
 func (r *File) SaveMany(ctx context.Context, urls []models.URL) error {
 	for i := range urls {
 		if err := r.Save(ctx, urls[i]); err != nil {
@@ -90,6 +95,7 @@ func (r *File) SaveMany(ctx context.Context, urls []models.URL) error {
 	return nil
 }
 
+// GetURL возвращает URL по его короткой ссылке.
 func (r *File) GetURL(ctx context.Context, id string) (models.URL, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -101,6 +107,7 @@ func (r *File) GetURL(ctx context.Context, id string) (models.URL, error) {
 	return models.URL{}, errx.ErrNotFound
 }
 
+// GetUserURLs возвращает все URLs пользователя.
 func (r *File) GetUserURLs(ctx context.Context, userID uuid.UUID) ([]models.URL, error) {
 	var urls []models.URL
 
@@ -116,11 +123,12 @@ func (r *File) GetUserURLs(ctx context.Context, userID uuid.UUID) ([]models.URL,
 	return urls, nil
 }
 
+// DeleteURLs помечает URLs как удаленные.
 func (r *File) DeleteURLs(ctx context.Context, deletableURLs []models.DeletableURL) {
 	for i, deletableURL := range deletableURLs {
 		select {
 		case <-ctx.Done():
-			logger.Log.Sugar().Warnw("context done", "not deleted urls", deletableURLs[i:])
+			logger.Log.Warnw("Context done", "not deleted urls", deletableURLs[i:])
 			return
 		default:
 			if ids, ok := r.userUrlsCache[deletableURL.CreatorID]; ok {
@@ -132,7 +140,7 @@ func (r *File) DeleteURLs(ctx context.Context, deletableURLs []models.DeletableU
 						case r.queue <- url:
 							continue
 						case <-r.shutdown:
-							logger.Log.Sugar().Warnw("file storage closed", "not deleted urls", deletableURLs[i:])
+							logger.Log.Warnw("File storage closed", "not deleted urls", deletableURLs[i:])
 						}
 					}
 				}
@@ -141,16 +149,18 @@ func (r *File) DeleteURLs(ctx context.Context, deletableURLs []models.DeletableU
 	}
 }
 
+// PingDB проверяет соединение с хранилищем (не реализовано для файлового хранилища).
 func (r *File) PingDB(ctx context.Context) error {
 	return errors.New("not a db storage")
 }
 
+// Close закрывает файловое хранилище.
 func (r *File) Close() {
 	close(r.shutdown)
 	r.wg.Wait()
 
 	if err := r.file.Close(); err != nil {
-		logger.Log.Sugar().Errorw("close file", "error", err)
+		logger.Log.Errorw("Close file failed", "error", err)
 	}
 }
 
@@ -193,14 +203,14 @@ func (r *File) asyncWriter() {
 		select {
 		case userURL := <-r.queue:
 			if err := r.saveToFile(userURL); err != nil {
-				logger.Log.Sugar().Errorw("failed to save to file", "userURL", userURL, "error", err)
+				logger.Log.Errorw("Failed to save to file", "userURL", userURL, "error", err)
 			}
 		case <-r.shutdown:
 			for {
 				select {
 				case userURL := <-r.queue:
 					if err := r.saveToFile(userURL); err != nil {
-						logger.Log.Sugar().Errorw("failed to save to file", "userURL", userURL, "error", err)
+						logger.Log.Errorw("Failed to save to file", "userURL", userURL, "error", err)
 					}
 				default:
 					return

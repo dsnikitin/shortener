@@ -4,6 +4,7 @@ import (
 	"net/http"
 )
 
+// BodyMaxBytesReader middleware ограничивает максимальный размер тела запроса.
 func BodyMaxBytesReader(maxSize int64) func(h http.Handler) http.Handler {
 	return func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

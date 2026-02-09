@@ -6,20 +6,23 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/dsnikitin/shortener/internal/logger"
 	"github.com/dsnikitin/shortener/internal/models"
-	"github.com/google/uuid"
 )
 
 const dbRequestSecondsTimeout = 3
-const flushSecondsInterval = 5
+const flushSecondsInterval = 3
 const batchSize = 100
 const inputWorkers = 5
 
+// Repository определяет интерфейс репозитория для удаления URL.
 type Repository interface {
 	DeleteURLs(ctx context.Context, data []models.DeletableURL)
 }
 
+// Deleter представляет менеджер для асинхронного удаления URL.
 type Deleter struct {
 	r Repository
 
@@ -34,6 +37,7 @@ type Deleter struct {
 	flushCh chan struct{}
 }
 
+// New создает новый менеджер удаления URL.
 func New(r Repository) *Deleter {
 	m := &Deleter{
 		r:        r,
@@ -44,10 +48,13 @@ func New(r Repository) *Deleter {
 		flushCh:  make(chan struct{}, 1),
 	}
 
+	m.run()
+
 	return m
 }
 
-func (m *Deleter) Run() {
+// Run запускает менеджер удаления URL.
+func (m *Deleter) run() {
 	for range inputWorkers {
 		m.wg.Add(1)
 		go m.inputWorker()
@@ -60,13 +67,15 @@ func (m *Deleter) Run() {
 	go m.writer()
 }
 
+// Stop останавливает менеджер удаления URL.
 func (m *Deleter) Stop() {
 	close(m.stopCh)
 	m.wg.Wait()
 
-	logger.Log.Sugar().Info("deletion manager stopped")
+	logger.Log.Info("URL deleter stopped")
 }
 
+// DeleteUserURLs добавляет URLs для удаления.
 func (m *Deleter) DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids []string) error {
 	for _, id := range ids {
 		select {

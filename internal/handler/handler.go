@@ -7,15 +7,18 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"github.com/dsnikitin/shortener/internal/config"
 	"github.com/dsnikitin/shortener/internal/errx"
 	"github.com/dsnikitin/shortener/internal/logger"
 	"github.com/dsnikitin/shortener/internal/models"
-	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 )
 
+// Service определяет интерфейс сервиса сокращения ссылок.
 type Service interface {
 	CreateID(ctx context.Context, userID uuid.UUID, url string) (string, error)
 	CreateIDs(ctx context.Context, userID uuid.UUID, req map[string]string) (map[string]string, error)
@@ -25,18 +28,30 @@ type Service interface {
 	DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids []string) error
 }
 
+// Auditor определяет интерфейс аудитора событий.
+type Auditor interface {
+	PublishEvent(event models.Event)
+}
+
+// Handler представляет HTTP обработчики сервиса сокращения ссылок.
 type Handler struct {
 	shortURLBaseAddr string
 	s                Service
+	auditor          Auditor
 }
 
-func New(shortURLBaseAddr string, s Service) *Handler {
+// New создает новый экземпляр Handler.
+func New(shortURLBaseAddr string, s Service, auditor Auditor) *Handler {
 	return &Handler{
 		shortURLBaseAddr: shortURLBaseAddr,
 		s:                s,
+		auditor:          auditor,
 	}
 }
 
+// Shorten обрабатывает запрос на создание короткого URL из текстового тела.
+// Ожидает plain text в теле запроса, возвращает короткий URL в текстовом виде.
+// При успехе возвращает статус 201 Created или 409 Conflict, если URL уже существует.
 func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
 	userID, ok := parseUserID(w, r)
 	if !ok {
@@ -45,7 +60,7 @@ func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
 
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		logger.Log.Sugar().Errorw("cannot read request text body", "error", err.Error())
+		logger.Log.Errorw("Cannot read request text body", "error", err.Error())
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -55,14 +70,14 @@ func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/plain")
+	originalURL := string(bodyBytes)
 	status := http.StatusCreated
 
-	id, err := h.s.CreateID(r.Context(), userID, string(bodyBytes))
+	id, err := h.s.CreateID(r.Context(), userID, originalURL)
 	if err != nil {
 		var aeErr *errx.ErrAlreadyExists
 		if !errors.As(err, &aeErr) {
-			logger.Log.Sugar().Errorw("failed to create id", "error", err.Error())
+			logger.Log.Errorw("Failed to create id", "error", err.Error())
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -71,10 +86,21 @@ func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
 		id = aeErr.URL.ID
 	}
 
+	h.auditor.PublishEvent(models.Event{
+		Timestamp:   time.Now().Unix(),
+		Action:      models.Shorten,
+		UserID:      userID.String(),
+		OriginalURL: originalURL,
+	})
+
+	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(status)
 	io.WriteString(w, h.shortURLBaseAddr+"/"+id)
 }
 
+// ShortenFromJSON обрабатывает запрос на создание короткого URL из JSON.
+// Ожидает JSON тело вида {"url": "..."}. Возвращает JSON ответ вида {"result": "..."} с коротким URL.
+// При успехе возвращает статус 201 Created или 409 Conflict, если URL уже существует.
 func (h *Handler) ShortenFromJSON(w http.ResponseWriter, r *http.Request) {
 	userID, ok := parseUserID(w, r)
 	if !ok {
@@ -83,7 +109,7 @@ func (h *Handler) ShortenFromJSON(w http.ResponseWriter, r *http.Request) {
 
 	var req models.ShortenRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		logger.Log.Sugar().Errorw("cannot read request JSON body", "error", err.Error())
+		logger.Log.Errorw("Cannot read request JSON body", "error", err.Error())
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -93,14 +119,13 @@ func (h *Handler) ShortenFromJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	status := http.StatusCreated
 
 	id, err := h.s.CreateID(r.Context(), userID, req.URL)
 	if err != nil {
 		var aeErr *errx.ErrAlreadyExists
 		if !errors.As(err, &aeErr) {
-			logger.Log.Sugar().Errorw("failed to create id", "error", err.Error())
+			logger.Log.Errorw("Failed to create id", "error", err.Error())
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -109,15 +134,26 @@ func (h *Handler) ShortenFromJSON(w http.ResponseWriter, r *http.Request) {
 		id = aeErr.URL.ID
 	}
 
+	h.auditor.PublishEvent(models.Event{
+		Timestamp:   time.Now().Unix(),
+		Action:      models.Shorten,
+		UserID:      userID.String(),
+		OriginalURL: req.URL,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 
 	resp := models.ShortenResponse{Result: h.shortURLBaseAddr + "/" + id}
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		logger.Log.Sugar().Errorw("encoding shorten response", "error", err)
-		return
+		logger.Log.Errorw("Encoding shorten response", "error", err)
 	}
 }
 
+// ShortenBatch обрабатывает пакетный запрос на создание коротких URL.
+// Ожидает JSON массив объектов {"correlation_id": "...", "original_url": "..."}.
+// Возвращает массив объектов {"correlation_id": "...", "short_url": "..."}.
+// При успехе возвращает статус 201 Created или 409 Conflict, если какой-либо URL уже существует.
 func (h *Handler) ShortenBatch(w http.ResponseWriter, r *http.Request) {
 	userID, ok := parseUserID(w, r)
 	if !ok {
@@ -126,7 +162,7 @@ func (h *Handler) ShortenBatch(w http.ResponseWriter, r *http.Request) {
 
 	var req []models.ShortenBatchRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		logger.Log.Sugar().Errorw("cannot read shorten batch request", "error", err.Error())
+		logger.Log.Errorw("Cannot read shorten batch request", "error", err.Error())
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -150,7 +186,7 @@ func (h *Handler) ShortenBatch(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var aeErr *errx.ErrAlreadyExists
 		if !errors.As(err, &aeErr) {
-			logger.Log.Sugar().Errorw("failed to create ids", "error", err.Error())
+			logger.Log.Errorw("Failed to create ids", "error", err.Error())
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -163,7 +199,7 @@ func (h *Handler) ShortenBatch(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
 		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			logger.Log.Sugar().Errorw("encoding shorten batch response", "error", err)
+			logger.Log.Errorw("Encoding shorten batch response", "error", err)
 		}
 		return
 	}
@@ -171,6 +207,9 @@ func (h *Handler) ShortenBatch(w http.ResponseWriter, r *http.Request) {
 	h.sendBatchResponse(w, req, ids)
 }
 
+// Redirect обрабатывает запрос по короткой сслыке и выполняет редирект на оригинальный URL.
+// Если URL помечен как удаленный, возвращает статус 410 Gone.
+// В противном случае выполняет временный редирект 307.
 func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if id == "" || len(id) > config.IDMaxLength {
@@ -181,7 +220,7 @@ func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request) {
 	url, err := h.s.GetURL(r.Context(), id)
 	if err != nil {
 		if !errors.Is(err, errx.ErrNotFound) {
-			logger.Log.Sugar().Errorw("failed to get original url", "error", err.Error())
+			logger.Log.Errorw("Failed to get original url", "error", err.Error())
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -190,16 +229,22 @@ func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/plain")
+	h.auditor.PublishEvent(models.Event{
+		Timestamp:   time.Now().Unix(),
+		Action:      models.Follow,
+		OriginalURL: url.Original,
+	})
 
+	w.Header().Set("Content-Type", "text/plain")
 	if url.IsDeleted {
 		w.WriteHeader(http.StatusGone)
-		return
+	} else {
+		http.Redirect(w, r, url.Original, http.StatusTemporaryRedirect)
 	}
-
-	http.Redirect(w, r, url.Original, http.StatusTemporaryRedirect)
 }
 
+// PingDB проверяет доступность базы данных и возвращает статус 200 OK при успехе.
+// При ошибке возвращает статус 500 Internal Server Error.
 func (h *Handler) PingDB(w http.ResponseWriter, r *http.Request) {
 	if err := h.s.PingDB(r.Context()); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -210,6 +255,9 @@ func (h *Handler) PingDB(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// GetUserURLs возвращает список всех неудаленных URL пользователя.
+// Возвращает JSON массив объектов  {"short_url": "...", "original_url": "..."}.
+// Если ни одного URL нет, возвращает статус 204 No Content.
 func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	userID, ok := parseUserID(w, r)
 	if !ok {
@@ -218,7 +266,7 @@ func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 
 	urls, err := h.s.GetUserURLs(r.Context(), userID)
 	if err != nil {
-		logger.Log.Sugar().Errorw("failed to get user urls", "userID", userID)
+		logger.Log.Errorw("Failed to get user urls", "userID", userID)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -242,11 +290,13 @@ func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		logger.Log.Sugar().Errorw("encoding user urls response", "error", err)
+		logger.Log.Errorw("Encoding user urls response", "error", err)
 		return
 	}
 }
 
+// DeleteUserURLs обрабатывает запрос на пометку как удаленные URLs пользователя.
+// Ожидает JSON массив коротких ссылок. Возвращает статус 202 Accepted при успехе.
 func (h *Handler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
 	userID, ok := parseUserID(w, r)
 	if !ok {
@@ -255,7 +305,7 @@ func (h *Handler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
 
 	var ids []string
 	if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
-		logger.Log.Sugar().Errorw("cannot read delete user urls request", "error", err.Error())
+		logger.Log.Errorw("Cannot read delete user urls request", "error", err.Error())
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -266,7 +316,7 @@ func (h *Handler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.s.DeleteUserURLs(r.Context(), userID, ids); err != nil {
-		logger.Log.Sugar().Errorw("delete user urls", "error", err.Error())
+		logger.Log.Errorw("Delete user urls", "error", err.Error())
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -281,7 +331,7 @@ func (h *Handler) sendBatchResponse(
 	for i := range req {
 		id, ok := ids[req[i].CorrelationID]
 		if !ok {
-			logger.Log.Sugar().Errorw("missing result", "correlationID", req[i].CorrelationID)
+			logger.Log.Errorw("Missing result", "correlationID", req[i].CorrelationID)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -295,7 +345,7 @@ func (h *Handler) sendBatchResponse(
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		logger.Log.Sugar().Errorw("encoding shorten batch response", "error", err)
+		logger.Log.Errorw("Encoding shorten batch response", "error", err)
 		return
 	}
 }
@@ -304,7 +354,7 @@ func parseUserID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 	strUserID := r.Header.Get("x-user-id")
 	userID, err := uuid.Parse(strUserID)
 	if err != nil {
-		logger.Log.Sugar().Errorw("failed to parse userID to uuid", "userID", strUserID)
+		logger.Log.Errorw("Failed to parse userID to uuid", "userID", strUserID)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return uuid.Nil, false
 	}

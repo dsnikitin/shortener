@@ -5,18 +5,21 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/dsnikitin/shortener/internal/logger"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
+
+	"github.com/dsnikitin/shortener/internal/logger"
 )
 
 const authCookieName = "auth_token"
 
+// Claims представляет JWT claims с информацией о пользователе.
 type Claims struct {
 	jwt.RegisteredClaims
 	UserID uuid.UUID
 }
 
+// Auth middleware для аутентификации пользователей с помощью JWT.
 func Auth(JWTSigningKey string) func(h http.Handler) http.Handler {
 	return func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -27,7 +30,7 @@ func Auth(JWTSigningKey string) func(h http.Handler) http.Handler {
 				userID = uuid.New()
 				tokenStr, err := createJWTString(JWTSigningKey, userID)
 				if err != nil {
-					logger.Log.Sugar().Errorw("failed to create jwt token", "error", err)
+					logger.Log.Errorw("Failed to create jwt token", "error", err)
 					http.Error(w, "internal server error", http.StatusInternalServerError)
 					return
 				}
@@ -41,7 +44,7 @@ func Auth(JWTSigningKey string) func(h http.Handler) http.Handler {
 				http.SetCookie(w, cookie)
 			} else {
 				if userID, err = getUserID(JWTSigningKey, cookie.Value); err != nil {
-					logger.Log.Sugar().Errorw("failed to get userID from auth token", "error", err)
+					logger.Log.Errorw("Failed to get userID from auth token", "error", err)
 					w.WriteHeader(http.StatusUnauthorized)
 					return
 				}

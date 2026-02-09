@@ -5,14 +5,17 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dsnikitin/shortener/internal/logger"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/dsnikitin/shortener/internal/logger"
 )
 
+// Config содержит конфигурацию подключения к базе данных.
 type Config struct {
-	DSN string `env:"DATABASE_DSN"`
+	DSN string `env:"DSN"`
 }
 
+// New создает пул соединений с базой данных PostgreSQL.
 func New(cfg *Config) (*pgxpool.Pool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -26,6 +29,6 @@ func New(cfg *Config) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("ping db: %w", err)
 	}
 
-	logger.Log.Sugar().Infow("successfuly connected to database")
+	logger.Log.Infow("Successfully connected to database")
 	return pool, nil
 }

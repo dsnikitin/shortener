@@ -3,10 +3,13 @@ package main
 import (
 	"net/http"
 
+	chimiddleware "github.com/go-chi/chi/v5/middleware"
+
+	"github.com/go-chi/chi/v5"
+
 	"github.com/dsnikitin/shortener/internal/config"
 	"github.com/dsnikitin/shortener/internal/handler"
 	"github.com/dsnikitin/shortener/internal/middleware"
-	"github.com/go-chi/chi/v5"
 )
 
 func initChiRouter(cfg *config.Config, h *handler.Handler) *chi.Mux {
@@ -29,6 +32,10 @@ func initChiRouter(cfg *config.Config, h *handler.Handler) *chi.Mux {
 		r.With(middleware.BodyMaxBytesReader(config.OriginalURLMaxBatchLength)).
 			Delete("/user/urls", http.HandlerFunc(h.DeleteUserURLs))
 	})
+
+	if cfg.IsDevelop {
+		r.Mount("/debug", chimiddleware.Profiler())
+	}
 
 	return r
 }

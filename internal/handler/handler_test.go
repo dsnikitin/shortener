@@ -5,20 +5,22 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/dsnikitin/shortener/internal/config"
-	"github.com/dsnikitin/shortener/internal/errx"
-	"github.com/dsnikitin/shortener/internal/handler"
-	"github.com/dsnikitin/shortener/internal/models"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+
+	"github.com/dsnikitin/shortener/internal/config"
+	"github.com/dsnikitin/shortener/internal/errx"
+	"github.com/dsnikitin/shortener/internal/handler"
+	"github.com/dsnikitin/shortener/internal/models"
 )
 
 type MockService struct {
@@ -58,6 +60,12 @@ func (m *MockService) DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids 
 	return args.Error(0)
 }
 
+type MockAuditor struct {
+	mock.Mock
+}
+
+func (m *MockAuditor) PublishEvent(models.Event) {}
+
 func TestHandler_Shorten(t *testing.T) {
 	userID := uuid.New()
 
@@ -76,7 +84,7 @@ func TestHandler_Shorten(t *testing.T) {
 	}
 
 	s := new(MockService)
-	h := handler.New(cfg.ShortURLBaseAddr, s)
+	h := handler.New(cfg.ShortURLBaseAddr, s, new(MockAuditor))
 
 	r := chi.NewRouter()
 	r.Post("/", h.Shorten)
@@ -166,6 +174,34 @@ func TestHandler_Shorten(t *testing.T) {
 	}
 }
 
+func ExampleHandler_Shorten() {
+	userID := uuid.New()
+	originalURL := "https://practicum.yandex.ru"
+
+	service := new(MockService)
+	service.On("CreateID", userID, originalURL).Return("abcdefg", nil).Once()
+
+	h := handler.New("http://localhost:8080", service, new(MockAuditor))
+
+	mux := chi.NewRouter()
+	mux.Post("/", h.Shorten)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(originalURL))
+	req.Header.Set("x-user-id", userID.String())
+
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, req)
+
+	res := recorder.Result()
+	defer res.Body.Close()
+
+	shortURL, _ := io.ReadAll(res.Body)
+	fmt.Println(string(shortURL))
+
+	// Output:
+	// http://localhost:8080/abcdefg
+}
+
 func TestHandler_ShortenFromJSON(t *testing.T) {
 	userID := uuid.New()
 
@@ -185,7 +221,7 @@ func TestHandler_ShortenFromJSON(t *testing.T) {
 	}
 
 	s := new(MockService)
-	h := handler.New(cfg.ShortURLBaseAddr, s)
+	h := handler.New(cfg.ShortURLBaseAddr, s, new(MockAuditor))
 
 	r := chi.NewRouter()
 	r.Post("/api/shorten", h.ShortenFromJSON)
@@ -285,6 +321,38 @@ func TestHandler_ShortenFromJSON(t *testing.T) {
 	}
 }
 
+func ExampleHandler_ShortenFromJSON() {
+	userID := uuid.New()
+	req := models.ShortenRequest{URL: "https://practicum.yandex.ru"}
+
+	service := new(MockService)
+	service.On("CreateID", userID, req.URL).Return("abcdefg", nil).Once()
+
+	h := handler.New("http://localhost:8080", service, new(MockAuditor))
+
+	mux := chi.NewRouter()
+	mux.Post("/api/shorten", h.ShortenFromJSON)
+
+	body, _ := json.Marshal(req)
+
+	httpReq := httptest.NewRequest(http.MethodPost, "/api/shorten", bytes.NewBuffer(body))
+	httpReq.Header.Set("x-user-id", userID.String())
+	httpReq.Header.Add("Content-Type", "application/json")
+
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, httpReq)
+
+	res := recorder.Result()
+	defer res.Body.Close()
+
+	var resp models.ShortenResponse
+	json.NewDecoder(res.Body).Decode(&resp)
+	fmt.Println(resp.Result)
+
+	// Output:
+	// http://localhost:8080/abcdefg
+}
+
 func TestHandler_Redirect(t *testing.T) {
 	type headers struct {
 		contentType string
@@ -301,7 +369,7 @@ func TestHandler_Redirect(t *testing.T) {
 	}
 
 	s := new(MockService)
-	h := handler.New(cfg.ShortURLBaseAddr, s)
+	h := handler.New(cfg.ShortURLBaseAddr, s, new(MockAuditor))
 
 	r := chi.NewRouter()
 	r.Get("/{id}", h.Redirect)
@@ -318,13 +386,13 @@ func TestHandler_Redirect(t *testing.T) {
 			id:     "abcdefg",
 			method: http.MethodGet,
 			servicesMockCall: func() {
-				url := models.URL{ID: "abcdefg", Original: "http://localhost:8080/abcdefg"}
+				url := models.URL{ID: "abcdefg", Original: "https://practicum.yandex.ru"}
 				s.On("GetURL", "abcdefg").Return(url, nil).Once()
 			},
 			want: want{
 				code: http.StatusTemporaryRedirect,
 				headers: headers{
-					location:    "http://localhost:8080/abcdefg",
+					location:    "https://practicum.yandex.ru",
 					contentType: "text/plain",
 				},
 			},
@@ -369,7 +437,7 @@ func TestHandler_Redirect(t *testing.T) {
 			id:     "abcdefg",
 			method: http.MethodGet,
 			servicesMockCall: func() {
-				url := models.URL{ID: "abcdefg", Original: "http://localhost:8080/abcdefg", IsDeleted: true}
+				url := models.URL{ID: "abcdefg", Original: "https://practicum.yandex.ru", IsDeleted: true}
 				s.On("GetURL", "abcdefg").Return(url, nil).Once()
 			},
 			want: want{
@@ -401,6 +469,31 @@ func TestHandler_Redirect(t *testing.T) {
 	}
 }
 
+func ExampleHandler_Redirect() {
+	short := "abcdefg"
+	url := models.URL{ID: short, Original: "https://practicum.yandex.ru"}
+
+	service := new(MockService)
+	service.On("GetURL", "abcdefg").Return(url, nil).Once()
+
+	h := handler.New("http://localhost:8080", service, new(MockAuditor))
+
+	mux := chi.NewRouter()
+	mux.Get("/{id}", h.Redirect)
+
+	req := httptest.NewRequest(http.MethodGet, "/"+short, nil)
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, req)
+
+	res := recorder.Result()
+	defer res.Body.Close()
+
+	fmt.Println(res.Header.Get("Location"))
+
+	// Output:
+	// https://practicum.yandex.ru
+}
+
 func TestHandler_PingDB(t *testing.T) {
 	type want struct {
 		code        int
@@ -412,7 +505,7 @@ func TestHandler_PingDB(t *testing.T) {
 	}
 
 	s := new(MockService)
-	h := handler.New(cfg.ShortURLBaseAddr, s)
+	h := handler.New(cfg.ShortURLBaseAddr, s, new(MockAuditor))
 
 	r := chi.NewRouter()
 	r.Get("/ping", h.PingDB)
@@ -491,7 +584,7 @@ func TestHandler_ShortenBatch(t *testing.T) {
 	}
 
 	s := new(MockService)
-	h := handler.New(cfg.ShortURLBaseAddr, s)
+	h := handler.New(cfg.ShortURLBaseAddr, s, new(MockAuditor))
 
 	r := chi.NewRouter()
 	r.Post("/api/shorten/batch", h.ShortenBatch)
@@ -624,7 +717,46 @@ func TestHandler_ShortenBatch(t *testing.T) {
 	}
 }
 
-func TestHandler_GetUserUrls(t *testing.T) {
+func ExampleHandler_ShortenBatch() {
+	userID := uuid.New()
+	req := []models.ShortenBatchRequest{
+		{CorrelationID: "1", OriginalURL: "http://bstoudwr.biz/ray1dv90xyg"},
+		{CorrelationID: "2", OriginalURL: "https://practicum.yandex.ru"},
+	}
+
+	service := new(MockService)
+	URLs := map[string]string{"1": "http://bstoudwr.biz/ray1dv90xyg", "2": "https://practicum.yandex.ru"}
+	ids := map[string]string{"1": "gfedcba", "2": "abcdefg"}
+	service.On("CreateIDs", userID, URLs).Return(ids, nil).Once()
+
+	h := handler.New("http://localhost:8080", service, new(MockAuditor))
+
+	mux := chi.NewRouter()
+	mux.Post("/api/shorten/batch", h.ShortenBatch)
+
+	body, _ := json.Marshal(req)
+
+	httpReq := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", bytes.NewBuffer(body))
+	httpReq.Header.Set("x-user-id", userID.String())
+	httpReq.Header.Add("Content-Type", "application/json")
+
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, httpReq)
+
+	res := recorder.Result()
+	defer res.Body.Close()
+
+	var resp []models.ShortenBatchResponse
+	json.NewDecoder(res.Body).Decode(&resp)
+	fmt.Println(resp[0].ShortURL)
+	fmt.Println(resp[1].ShortURL)
+
+	// Output:
+	// http://localhost:8080/gfedcba
+	// http://localhost:8080/abcdefg
+}
+
+func TestHandler_GetUserURLs(t *testing.T) {
 	userID := uuid.New()
 
 	type headers struct {
@@ -644,7 +776,7 @@ func TestHandler_GetUserUrls(t *testing.T) {
 	}
 
 	s := new(MockService)
-	h := handler.New(cfg.ShortURLBaseAddr, s)
+	h := handler.New(cfg.ShortURLBaseAddr, s, new(MockAuditor))
 
 	r := chi.NewRouter()
 	r.Get("/api/user/urls", h.GetUserURLs)
@@ -765,4 +897,38 @@ func TestHandler_GetUserUrls(t *testing.T) {
 			}
 		})
 	}
+}
+
+func ExampleHandler_GetUserURLs() {
+	userID := uuid.New()
+
+	service := new(MockService)
+	urls := []models.URL{
+		{ID: "gfedcba", Original: "http://bstoudwr.biz/ray1dv90xyg"},
+		{ID: "abcdefg", Original: "https://practicum.yandex.ru"},
+	}
+	service.On("GetUserURLs", userID).Return(urls, nil).Once()
+
+	h := handler.New("http://localhost:8080", service, new(MockAuditor))
+
+	mux := chi.NewRouter()
+	mux.Get("/api/user/urls", h.GetUserURLs)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
+	req.Header.Set("x-user-id", userID.String())
+
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, req)
+
+	res := recorder.Result()
+	defer res.Body.Close()
+
+	var resp []models.GetUserUrlsResponseItem
+	json.NewDecoder(res.Body).Decode(&resp)
+	fmt.Printf("%s %s\n", resp[0].ShortURL, resp[0].OriginalURL)
+	fmt.Printf("%s %s\n", resp[1].ShortURL, resp[1].OriginalURL)
+
+	// Output:
+	// http://localhost:8080/gfedcba http://bstoudwr.biz/ray1dv90xyg
+	// http://localhost:8080/abcdefg https://practicum.yandex.ru
 }
