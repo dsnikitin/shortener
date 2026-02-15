@@ -28,8 +28,7 @@ func (m *MockRepository) GetUserURLs(ctx context.Context, userID uuid.UUID) ([]m
 func (m *MockRepository) PingDB(ctx context.Context) error               { return nil }
 func (m *MockRepository) Save(ctx context.Context, url models.URL) error { return nil }
 func (m *MockRepository) SaveMany(ctx context.Context, urls []models.URL) error {
-	args := m.Called()
-	return args.Error(0)
+	return m.Called().Error(0)
 }
 func (m *MockRepository) DeleteURLs(ctx context.Context, data []models.DeletableURL) {}
 func (m *MockRepository) Close()                                                     {}
@@ -39,7 +38,7 @@ type MockURLDeleter struct {
 }
 
 func (m *MockURLDeleter) DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids []string) error {
-	return nil
+	return m.Called().Error(0)
 }
 
 const (
@@ -58,13 +57,10 @@ func BenchmarkCreateIDs(b *testing.B) {
 		r := new(MockRepository)
 		r.On("SaveMany").Return(nil).Once()
 
-		d := new(MockURLDeleter)
-		d.On("DeleteUserURLs").Return(nil).Once()
-
-		s := service.New(r, d)
+		s := service.New(r, new(MockURLDeleter))
 
 		b.StartTimer()
-		s.CreateIDs(b.Context(), userID, req)
+		_, _ = s.CreateIDs(b.Context(), userID, req)
 	})
 	b.Run("already exists", func(b *testing.B) {
 		b.StopTimer()
@@ -81,13 +77,10 @@ func BenchmarkCreateIDs(b *testing.B) {
 		r := new(MockRepository)
 		r.On("SaveMany").Return(err).Once()
 
-		d := new(MockURLDeleter)
-		d.On("DeleteUserURLs").Return(nil).Once()
-
-		s := service.New(r, d)
+		s := service.New(r, new(MockURLDeleter))
 
 		b.StartTimer()
-		s.CreateIDs(b.Context(), userID, req)
+		_, _ = s.CreateIDs(b.Context(), userID, req)
 	})
 }
 

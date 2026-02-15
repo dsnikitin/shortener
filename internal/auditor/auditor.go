@@ -59,7 +59,9 @@ func (a *Auditor) Stop() {
 		c.Stop()
 	}
 
-	a.eg.Wait()
+	if err := a.eg.Wait(); err != nil {
+		logger.Log.Errorw("Error while waiting for auditor to stop", "error", err)
+	}
 	logger.Log.Info("Auditor stopped")
 }
 

@@ -95,7 +95,10 @@ func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(status)
-	io.WriteString(w, h.shortURLBaseAddr+"/"+id)
+	// #nosec G705 -- CreateID возвращает SHA256+base64.URLEncoding
+	if _, err := io.WriteString(w, h.shortURLBaseAddr+"/"+id); err != nil {
+		logger.Log.Errorw("Writing shorten response", "error", err)
+	}
 }
 
 // ShortenFromJSON обрабатывает запрос на создание короткого URL из JSON.

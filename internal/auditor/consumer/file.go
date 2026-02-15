@@ -21,7 +21,7 @@ type File struct {
 // path - путь к файлу для записи событий,
 // eventsLimit - максимальный размер очереди событий.
 func NewFile(id, path string, eventsLimit int) (*File, error) {
-	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0600) // #nosec G304
 	if err != nil {
 		return nil, errors.Wrap(err, "open file")
 	}

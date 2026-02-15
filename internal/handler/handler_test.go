@@ -43,8 +43,7 @@ func (m *MockService) GetURL(ctx context.Context, id string) (models.URL, error)
 }
 
 func (m *MockService) PingDB(ctx context.Context) error {
-	args := m.Called()
-	return args.Error(0)
+	return m.Called().Error(0)
 }
 
 func (m *MockService) GetUserURLs(ctx context.Context, userID uuid.UUID) ([]models.URL, error) {
@@ -56,8 +55,7 @@ func (m *MockService) GetUserURLs(ctx context.Context, userID uuid.UUID) ([]mode
 }
 
 func (m *MockService) DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids []string) error {
-	args := m.Called(userID)
-	return args.Error(0)
+	return m.Called(userID).Error(0)
 }
 
 type MockAuditor struct {
@@ -308,8 +306,8 @@ func TestHandler_ShortenFromJSON(t *testing.T) {
 			assert.Equal(t, test.want.code, res.StatusCode)
 			assert.Equal(t, test.want.headers.contentType, res.Header.Get("Content-Type"))
 			if res.StatusCode >= 400 && res.StatusCode != 409 {
-				resp, err := io.ReadAll(res.Body)
-				require.NoError(t, err)
+				resp, readErr := io.ReadAll(res.Body)
+				require.NoError(t, readErr)
 				assert.Equal(t, test.want.errMsg, string(resp))
 			} else {
 				resp := models.ShortenResponse{}
@@ -346,7 +344,11 @@ func ExampleHandler_ShortenFromJSON() {
 	defer res.Body.Close()
 
 	var resp models.ShortenResponse
-	json.NewDecoder(res.Body).Decode(&resp)
+	if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
+		fmt.Println(err)
+		return
+	}
+
 	fmt.Println(resp.Result)
 
 	// Output:
@@ -704,8 +706,8 @@ func TestHandler_ShortenBatch(t *testing.T) {
 			assert.Equal(t, test.want.code, res.StatusCode)
 			assert.Equal(t, test.want.headers.contentType, res.Header.Get("Content-Type"))
 			if res.StatusCode >= 400 && res.StatusCode != 409 {
-				resp, err := io.ReadAll(res.Body)
-				require.NoError(t, err)
+				resp, readErr := io.ReadAll(res.Body)
+				require.NoError(t, readErr)
 				assert.Equal(t, test.want.errMsg, string(resp))
 			} else {
 				resp := []models.ShortenBatchResponse{}
@@ -747,7 +749,11 @@ func ExampleHandler_ShortenBatch() {
 	defer res.Body.Close()
 
 	var resp []models.ShortenBatchResponse
-	json.NewDecoder(res.Body).Decode(&resp)
+	if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
+		fmt.Println(err)
+		return
+	}
+
 	fmt.Println(resp[0].ShortURL)
 	fmt.Println(resp[1].ShortURL)
 
@@ -883,17 +889,19 @@ func TestHandler_GetUserURLs(t *testing.T) {
 			assert.Equal(t, test.want.code, res.StatusCode)
 			assert.Equal(t, test.want.headers.contentType, res.Header.Get("Content-Type"))
 
-			if test.want.code == http.StatusOK {
+			switch {
+			case test.want.code == http.StatusOK:
 				var resp []models.GetUserUrlsResponseItem
 				err := json.NewDecoder(res.Body).Decode(&resp)
 				require.NoError(t, err)
 				assert.Equal(t, test.want.resp, resp)
-			} else if test.want.code == http.StatusNoContent {
+			case test.want.code == http.StatusNoContent:
 				assert.Equal(t, 0, recorder.Body.Len(), "response body should be empty for 204 status code")
-			} else if test.want.code >= 400 {
+			case test.want.code >= 400:
 				respBody, err := io.ReadAll(res.Body)
 				require.NoError(t, err)
 				assert.Equal(t, test.want.errMsg, string(respBody))
+
 			}
 		})
 	}
@@ -924,7 +932,11 @@ func ExampleHandler_GetUserURLs() {
 	defer res.Body.Close()
 
 	var resp []models.GetUserUrlsResponseItem
-	json.NewDecoder(res.Body).Decode(&resp)
+	if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
+		fmt.Println(err)
+		return
+	}
+
 	fmt.Printf("%s %s\n", resp[0].ShortURL, resp[0].OriginalURL)
 	fmt.Printf("%s %s\n", resp[1].ShortURL, resp[1].OriginalURL)
 

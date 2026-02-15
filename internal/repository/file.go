@@ -31,7 +31,7 @@ type File struct {
 
 // NewFile создает новое файловое хранилище.
 func NewFile(filePath string) (*File, error) {
-	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0600) // #nosec G304
 	if err != nil {
 		return nil, err
 	}

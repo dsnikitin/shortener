@@ -129,7 +129,7 @@ func (r *Postgres) GetUserURLs(ctx context.Context, userID uuid.UUID) ([]models.
 	var urls []models.URL
 	for rows.Next() {
 		var url models.URL
-		if err := rows.Scan(&url.ID, &url.Original, &url.CreatorID, &url.IsDeleted); err != nil {
+		if err = rows.Scan(&url.ID, &url.Original, &url.CreatorID, &url.IsDeleted); err != nil {
 			return nil, fmt.Errorf("scan row: %w", err)
 		}
 
