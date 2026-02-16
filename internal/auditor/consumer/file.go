@@ -11,6 +11,7 @@ import (
 )
 
 // File представляет файлового потребителя событий, который записывает события в файл.
+// generate:reset
 type File struct {
 	Consumer
 	file *os.File

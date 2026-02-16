@@ -12,6 +12,7 @@ import (
 )
 
 // Remote представляет удаленного потребителя событий, который отправляет события по HTTP.
+// generate:reset
 type Remote struct {
 	Consumer
 	url    string

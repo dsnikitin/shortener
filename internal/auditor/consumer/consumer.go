@@ -1,8 +1,7 @@
 package consumer
 
 import (
-	"errors"
-
+	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/dsnikitin/shortener/internal/logger"
@@ -10,6 +9,7 @@ import (
 )
 
 // Consumer представляет базового потребителя событий.
+// generate:reset
 type Consumer struct {
 	id       string
 	events   chan models.Event

@@ -5,7 +5,6 @@
 package main
 
 import (
-	"github.com/dsnikitin/shortener/cmd/staticlint/custom/exit"
 	critic "github.com/go-critic/go-critic/checkers/analyzer"
 	"github.com/securego/gosec/v2/goanalysis"
 	"golang.org/x/tools/go/analysis"
@@ -15,6 +14,8 @@ import (
 	"golang.org/x/tools/go/analysis/passes/structtag"
 	"honnef.co/go/tools/simple/s1000"
 	"honnef.co/go/tools/staticcheck"
+
+	"github.com/dsnikitin/shortener/cmd/staticlint/custom/exit"
 )
 
 // main является точкой входа в программу multichecker.

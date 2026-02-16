@@ -15,6 +15,7 @@ type Consumer interface {
 }
 
 // Auditor представляет аудитора событий, который отправляет события зарегистрированным потребителям.
+// generate:reset
 type Auditor struct {
 	consumers map[string]Consumer
 

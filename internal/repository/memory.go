@@ -14,6 +14,7 @@ import (
 )
 
 // Memory представляет хранилище URL в памяти.
+// generate:reset
 type Memory struct {
 	mu       sync.RWMutex
 	urls     map[string]models.URL

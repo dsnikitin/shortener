@@ -19,6 +19,7 @@ import (
 const queueSize int = 1000
 
 // File представляет файловое хранилище URL.
+// generate:reset
 type File struct {
 	mu            sync.RWMutex
 	urlsCache     map[string]models.URL
