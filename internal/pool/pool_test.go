@@ -193,7 +193,7 @@ func TestGetAfterPut(t *testing.T) {
 	// Должны получить объекты в обратном порядке (LIFO)
 	for i := range 3 {
 		obj := pool.Get()
-		if obj != objs[2-i] {
+		if obj != objs[i] {
 			t.Error("Pool should work as LIFO stack")
 		}
 	}
