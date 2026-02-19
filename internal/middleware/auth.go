@@ -20,7 +20,7 @@ type Claims struct {
 }
 
 // Auth middleware для аутентификации пользователей с помощью JWT.
-func Auth(JWTSigningKey string) func(h http.Handler) http.Handler {
+func Auth(jwtSigningKey string) func(h http.Handler) http.Handler {
 	return func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var userID uuid.UUID
@@ -28,22 +28,20 @@ func Auth(JWTSigningKey string) func(h http.Handler) http.Handler {
 			cookie, err := r.Cookie(authCookieName)
 			if err != nil {
 				userID = uuid.New()
-				tokenStr, err := createJWTString(JWTSigningKey, userID)
-				if err != nil {
+				cookie = &http.Cookie{
+					HttpOnly: true,
+					Name:     authCookieName,
+				}
+
+				if cookie.Value, err = createJWTString(jwtSigningKey, userID); err != nil {
 					logger.Log.Errorw("Failed to create jwt token", "error", err)
 					http.Error(w, "internal server error", http.StatusInternalServerError)
 					return
 				}
 
-				cookie = &http.Cookie{
-					HttpOnly: true,
-					Name:     authCookieName,
-					Value:    tokenStr,
-				}
-
 				http.SetCookie(w, cookie)
 			} else {
-				if userID, err = getUserID(JWTSigningKey, cookie.Value); err != nil {
+				if userID, err = getUserID(jwtSigningKey, cookie.Value); err != nil {
 					logger.Log.Errorw("Failed to get userID from auth token", "error", err)
 					w.WriteHeader(http.StatusUnauthorized)
 					return
@@ -61,12 +59,12 @@ func Auth(JWTSigningKey string) func(h http.Handler) http.Handler {
 	}
 }
 
-func createJWTString(JWTSigningKey string, userID uuid.UUID) (string, error) {
+func createJWTString(jwtSigningKey string, userID uuid.UUID) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, Claims{
 		UserID: userID,
 	})
 
-	tokenStr, err := token.SignedString([]byte(JWTSigningKey))
+	tokenStr, err := token.SignedString([]byte(jwtSigningKey))
 	if err != nil {
 		return "", err
 	}
@@ -74,7 +72,7 @@ func createJWTString(JWTSigningKey string, userID uuid.UUID) (string, error) {
 	return tokenStr, nil
 }
 
-func getUserID(JWTSigningKey, tokenStr string) (uuid.UUID, error) {
+func getUserID(jwtSigningKey, tokenStr string) (uuid.UUID, error) {
 	if tokenStr == "" {
 		return uuid.Nil, errors.New("token is empty")
 	}
@@ -86,7 +84,7 @@ func getUserID(JWTSigningKey, tokenStr string) (uuid.UUID, error) {
 				return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 			}
 
-			return []byte(JWTSigningKey), nil
+			return []byte(jwtSigningKey), nil
 		})
 	if err != nil {
 		return uuid.Nil, err

@@ -15,6 +15,7 @@ type Consumer interface {
 }
 
 // Auditor представляет аудитора событий, который отправляет события зарегистрированным потребителям.
+// generate:reset
 type Auditor struct {
 	consumers map[string]Consumer
 
@@ -59,7 +60,9 @@ func (a *Auditor) Stop() {
 		c.Stop()
 	}
 
-	a.eg.Wait()
+	if err := a.eg.Wait(); err != nil {
+		logger.Log.Errorw("Error while waiting for auditor to stop", "error", err)
+	}
 	logger.Log.Info("Auditor stopped")
 }
 

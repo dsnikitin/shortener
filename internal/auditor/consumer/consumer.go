@@ -1,8 +1,7 @@
 package consumer
 
 import (
-	"errors"
-
+	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/dsnikitin/shortener/internal/logger"
@@ -10,6 +9,7 @@ import (
 )
 
 // Consumer представляет базового потребителя событий.
+// generate:reset
 type Consumer struct {
 	id       string
 	events   chan models.Event
@@ -36,7 +36,9 @@ func (c *Consumer) Consume(event models.Event) error {
 // Stop останавливает потребителя, завершая все горутины и ожидая их завершения.
 func (c *Consumer) Stop() {
 	close(c.shutdown)
-	c.eg.Wait()
+	if err := c.eg.Wait(); err != nil {
+		logger.Log.Errorw("Error waiting for consumer to stop", "error", err)
+	}
 	logger.Log.Infof("Consumer %s stopped", c.id)
 }
 

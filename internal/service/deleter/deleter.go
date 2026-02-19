@@ -23,6 +23,7 @@ type Repository interface {
 }
 
 // Deleter представляет менеджер для асинхронного удаления URL.
+// generate:reset
 type Deleter struct {
 	r Repository
 

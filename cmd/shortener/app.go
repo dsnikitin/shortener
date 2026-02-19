@@ -39,7 +39,7 @@ func newApp(cfg *config.Config) *app {
 	}
 
 	if pgxPool != nil {
-		if err := applyMigrations(cfg.DataBase); err != nil {
+		if err = applyMigrations(cfg.DataBase); err != nil {
 			logger.Log.Fatalw("Failed to apply migrations", "error", err)
 		}
 	}
