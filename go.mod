@@ -46,6 +46,7 @@ require (
 )
 
 require (
+	dario.cat/mergo v1.0.2
 	github.com/caarlos0/env v3.5.0+incompatible
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/go-chi/chi/v5 v5.2.3

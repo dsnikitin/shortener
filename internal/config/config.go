@@ -1,10 +1,14 @@
 package config
 
 import (
+	"encoding/json"
 	"flag"
+	"os"
 	"strings"
 
+	"dario.cat/mergo"
 	"github.com/caarlos0/env"
+	"github.com/pkg/errors"
 
 	"github.com/dsnikitin/shortener/internal/config/audit"
 	"github.com/dsnikitin/shortener/internal/config/db"
@@ -21,17 +25,18 @@ const (
 
 // Config содержит конфигурацию приложения.
 type Config struct {
-	ServerAddr         string        `env:"SERVER_ADDRESS"`
-	ShortURLBaseAddr   string        `env:"BASE_URL"`
-	LogLevel           string        `env:"LOG_LEVEL"`
-	FileStoragePath    string        `env:"FILE_STORAGE_PATH"`
-	JWTSigningKey      string        `env:"JWT_SIGNING_KEY"`
-	IsDevelop          bool          `env:"IS_DEVELOP"`
-	DataBase           *db.Config    `envPrefix:"DATABASE_"`
-	Audit              *audit.Config `envPrefix:"AUDIT_"`
-	EnableHTTPS        bool          `env:"ENABLE_HTTPS"`
-	CertFilePath       string        `env:"CERT_FILE_PATH"`
-	PrivateKeyFilePath string        `env:"PRIVATE_KEY_FILE_PATH"`
+	ServerAddr         string        `env:"SERVER_ADDRESS" json:"server_address"`
+	ShortURLBaseAddr   string        `env:"BASE_URL" json:"base_url"`
+	LogLevel           string        `env:"LOG_LEVEL" json:"log_level"`
+	FileStoragePath    string        `env:"FILE_STORAGE_PATH" json:"file_storage_path"`
+	JWTSigningKey      string        `env:"JWT_SIGNING_KEY" json:"jwt_signing_key"`
+	IsDevelop          bool          `env:"IS_DEVELOP" json:"is_develop"`
+	EnableHTTPS        bool          `env:"ENABLE_HTTPS" json:"enable_https"`
+	CertFilePath       string        `env:"CERT_FILE_PATH" json:"cert_file_path"`
+	PrivateKeyFilePath string        `env:"PRIVATE_KEY_FILE_PATH" json:"private_key_file_path"`
+	DataBase           *db.Config    `envPrefix:"DATABASE_" json:"database"`
+	Audit              *audit.Config `envPrefix:"AUDIT_" json:"audit"`
+	ConfigFilePath     string        `env:"CONFIG" json:"-"`
 }
 
 // New создает и инициализирует конфигурацию приложения.
@@ -55,11 +60,19 @@ func New() (*Config, error) {
 	flag.BoolVar(&cfg.EnableHTTPS, "s", false, "enable https")
 	flag.StringVar(&cfg.CertFilePath, "cert-file", "", "path to file with cert for https")
 	flag.StringVar(&cfg.PrivateKeyFilePath, "key-file", "", "path to file with private key for https")
+	flag.StringVar(&cfg.ConfigFilePath, "c", "", "path to config file")
+	flag.StringVar(&cfg.ConfigFilePath, "config", "", "path to config file")
 
 	flag.Parse()
 
+	if cfg.ConfigFilePath != "" {
+		if err := loadFromJSONFile(cfg); err != nil {
+			return nil, errors.Wrap(err, "load from json file")
+		}
+	}
+
 	if err := env.Parse(cfg); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "parse envs")
 	}
 
 	if cfg.EnableHTTPS {
@@ -67,15 +80,35 @@ func New() (*Config, error) {
 		cfg.ShortURLBaseAddr = strings.Replace(cfg.ShortURLBaseAddr, "http://", "https://", 1)
 		cfg.ShortURLBaseAddr = strings.Replace(cfg.ShortURLBaseAddr, ":8080", ":8443", 1)
 
-		if cfg.IsDevelop {
-			if cfg.CertFilePath == "" {
-				cfg.CertFilePath = "./certs/cert.pem"
-			}
-			if cfg.PrivateKeyFilePath == "" {
-				cfg.PrivateKeyFilePath = "./certs/key.pem"
-			}
+		if cfg.CertFilePath == "" {
+			return nil, errors.New("empty cert file path")
+		}
+
+		if cfg.PrivateKeyFilePath == "" {
+			return nil, errors.New("empty private key file path")
 		}
 	}
 
 	return cfg, nil
+}
+
+// loadFromJSONFile загружает конфигурацию из json-файла и записывает в пустые поля структуры Config.
+func loadFromJSONFile(cfg *Config) error {
+	data, err := os.ReadFile(cfg.ConfigFilePath)
+	if err != nil {
+		return errors.Wrap(err, "read config file")
+	}
+
+	fileCfg := Config{
+		DataBase: &db.Config{},
+		Audit:    &audit.Config{},
+	}
+
+	if err := json.Unmarshal(data, &fileCfg); err != nil {
+		return errors.Wrap(err, "unmarshal config file data")
+	}
+
+	// заполняет только пустые поля в cfg значениями из fileCfg
+	err = mergo.Merge(cfg, fileCfg)
+	return errors.Wrap(err, "merge configs")
 }
