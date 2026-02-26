@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"database/sql"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -12,9 +12,11 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/pkg/errors"
 
 	"github.com/dsnikitin/shortener/internal/auditor"
 	"github.com/dsnikitin/shortener/internal/auditor/consumer"
+	"github.com/dsnikitin/shortener/internal/certx"
 	"github.com/dsnikitin/shortener/internal/config"
 	"github.com/dsnikitin/shortener/internal/config/audit"
 	"github.com/dsnikitin/shortener/internal/config/db"
@@ -26,6 +28,7 @@ import (
 )
 
 type app struct {
+	cfg        *config.Config
 	server     *http.Server
 	service    *service.Service
 	urlDeleter *deleter.Deleter
@@ -63,6 +66,7 @@ func newApp(cfg *config.Config) *app {
 	server := initServer(cfg, router)
 
 	return &app{
+		cfg:        cfg,
 		server:     server,
 		service:    s,
 		urlDeleter: urlDeleter,
@@ -71,9 +75,23 @@ func newApp(cfg *config.Config) *app {
 }
 
 func (a *app) start() {
-	logger.Log.Infow("Starting server", "address", a.server.Addr)
-	if err := a.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		logger.Log.Fatalw("Server starting failed", "error", err)
+	if !a.cfg.EnableHTTPS {
+		logger.Log.Infow("Starting HTTP server", "address", a.server.Addr)
+		if err := a.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Log.Fatalw("HTTP server starting failed", "error", err)
+		}
+		return
+	}
+
+	// иначе запускаем https-сервер
+	if err := a.ensureValidCert(); err != nil {
+		logger.Log.Fatalw("Failed to ensure valid cert", "error", err)
+	}
+
+	logger.Log.Infow("Starting HTTPS server", "address", a.server.Addr)
+	err := a.server.ListenAndServeTLS(a.cfg.CertFilePath, a.cfg.PrivateKeyFilePath)
+	if err != nil && err != http.ErrServerClosed {
+		logger.Log.Fatalw("HTTPS server starting failed", "error", err)
 	}
 }
 
@@ -98,23 +116,23 @@ func applyMigrations(cfg *db.Config) error {
 
 	db, err := sql.Open("pgx", cfg.DSN)
 	if err != nil {
-		return fmt.Errorf("open db: %w", err)
+		return errors.Wrap(err, "open db")
 	}
 	defer db.Close()
 
 	driver, err := pgx.WithInstance(db, &pgx.Config{})
 	if err != nil {
-		return fmt.Errorf("create db driver: %w", err)
+		return errors.Wrap(err, "create db driver")
 	}
 
 	m, err := migrate.NewWithDatabaseInstance("file://migrations", "pgx", driver)
 	if err != nil {
-		return fmt.Errorf("create migrate instance: %w", err)
+		return errors.Wrap(err, "create migrate instance")
 	}
 	defer m.Close()
 
 	if err = m.Up(); err != nil && err != migrate.ErrNoChange {
-		return fmt.Errorf("up migrations: %w", err)
+		return errors.Wrap(err, "up migrations")
 	}
 
 	logger.Log.Info("Migrations successfully applied")
@@ -132,13 +150,23 @@ func initStorage(cfg *config.Config, db *pgxpool.Pool) (service.Repository, erro
 	}
 }
 
-func initServer(conf *config.Config, router http.Handler) *http.Server {
-	return &http.Server{
-		Addr:         conf.ServerAddr,
+func initServer(cfg *config.Config, router http.Handler) *http.Server {
+	server := &http.Server{
+		Addr:         cfg.ServerAddr,
 		Handler:      router,
 		ReadTimeout:  40 * time.Second,
 		WriteTimeout: 40 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
+
+	if cfg.EnableHTTPS {
+		tlsCfg := &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
+		server.TLSConfig = tlsCfg
+	}
+
+	return server
 }
 
 func initAuditor(cfg *audit.Config) (*auditor.Auditor, error) {
@@ -147,7 +175,7 @@ func initAuditor(cfg *audit.Config) (*auditor.Auditor, error) {
 	if cfg.FilePath != "" {
 		fileConsumer, err := consumer.NewFile(cfg.FileConsumerID, cfg.FilePath, cfg.EventsLimit)
 		if err != nil {
-			return nil, fmt.Errorf("init file audit consumer: %w", err)
+			return nil, errors.Wrap(err, "init file audit consumer")
 		}
 
 		logger.Log.Infof("Consumer %s started", fileConsumer.GetID())
@@ -157,7 +185,7 @@ func initAuditor(cfg *audit.Config) (*auditor.Auditor, error) {
 	if cfg.URL != "" {
 		remoteConsumer, err := consumer.NewRemote(cfg.RemoteConsumerID, cfg.URL, cfg.EventsLimit)
 		if err != nil {
-			return nil, fmt.Errorf("init remote audit consumer: %w", err)
+			return nil, errors.Wrap(err, "init remote audit consumer")
 		}
 
 		logger.Log.Infof("Consumer %s started", remoteConsumer.GetID())
@@ -169,4 +197,24 @@ func initAuditor(cfg *audit.Config) (*auditor.Auditor, error) {
 	}
 
 	return auditor.New(cfg.EventsLimit, consumers...), nil
+}
+
+func (a *app) ensureValidCert() error {
+	err := certx.CheckCert(a.cfg.CertFilePath, a.cfg.PrivateKeyFilePath)
+	if err == nil {
+		return nil
+	}
+
+	// в dev режиме генерируем самоподписанный сертификат и приватный ключ
+	if a.cfg.IsDevelop &&
+		(errors.Is(err, certx.ErrKeyFileNotFound) ||
+			errors.Is(err, certx.ErrCertFileNotFound) ||
+			errors.Is(err, certx.ErrCertNotYetValid) ||
+			errors.Is(err, certx.ErrCertExpired)) {
+
+		err = certx.GenerateSelfSignedCert(a.cfg.CertFilePath, a.cfg.PrivateKeyFilePath)
+		return errors.Wrap(err, "generate self-signed certificate")
+	}
+
+	return errors.Wrap(err, "check certificate")
 }
