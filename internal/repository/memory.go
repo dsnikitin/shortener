@@ -2,11 +2,10 @@ package repository
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"sync"
 
 	"github.com/google/uuid"
+	"github.com/pkg/errors"
 
 	"github.com/dsnikitin/shortener/internal/errx"
 	"github.com/dsnikitin/shortener/internal/logger"
@@ -54,7 +53,8 @@ func (r *Memory) Save(ctx context.Context, url models.URL) error {
 func (r *Memory) SaveMany(ctx context.Context, urls []models.URL) error {
 	for i := range urls {
 		if err := r.Save(ctx, urls[i]); err != nil {
-			return fmt.Errorf("save one: %w", err)
+			logger.Log.Warnw("Failed to save urls", "not saved urls", urls[i:])
+			return errors.Wrap(err, "save one")
 		}
 	}
 
@@ -94,7 +94,8 @@ func (r *Memory) DeleteURLs(ctx context.Context, deletableURLs []models.Deletabl
 	for i, deletableURL := range deletableURLs {
 		select {
 		case <-ctx.Done():
-			logger.Log.Warnw("Context done", "not deleted urls", deletableURLs[i:])
+			logger.Log.Warnw("Failed to delete urls because request context done", "not deleted urls", deletableURLs[i:])
+			return
 		default:
 			if ids, ok := r.userURLs[deletableURL.CreatorID]; ok {
 				if _, ok := ids[deletableURL.ID]; ok {
@@ -114,4 +115,6 @@ func (r *Memory) PingDB(ctx context.Context) error {
 }
 
 // Close закрывает хранилище в памяти.
-func (r *Memory) Close() {}
+func (r *Memory) Close(context.Context) error {
+	return nil
+}

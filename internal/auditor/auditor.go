@@ -1,17 +1,20 @@
 package auditor
 
 import (
+	"context"
+
 	"golang.org/x/sync/errgroup"
 
 	"github.com/dsnikitin/shortener/internal/logger"
 	"github.com/dsnikitin/shortener/internal/models"
+	"github.com/pkg/errors"
 )
 
 // Consumer определяет интерфейс потребителя событий.
 type Consumer interface {
 	GetID() string
 	Consume(event models.Event) error
-	Stop()
+	Stop(ctx context.Context) error
 }
 
 // Auditor представляет аудитора событий, который отправляет события зарегистрированным потребителям.
@@ -48,22 +51,43 @@ func New(eventsLimit int, consumers ...Consumer) *Auditor {
 func (a *Auditor) PublishEvent(event models.Event) {
 	select {
 	case a.inputEvents <- event:
+	case <-a.shutdown:
+		logger.Log.Warnw("Event was not added to queue because auditor stopped", "event", event)
 	default:
 		logger.Log.Warnw("Event was not added to queue because it was full", "event", event)
 	}
 }
 
 // Stop останавливает аудитора и всех зарегистрированных потребителей.
-func (a *Auditor) Stop() {
+func (a *Auditor) Stop(ctx context.Context) error {
 	close(a.shutdown)
-	for _, c := range a.consumers {
-		c.Stop()
+
+	done := make(chan struct{})
+	go func() {
+		if err := a.eg.Wait(); err != nil {
+			logger.Log.Errorw("Error while waiting for auditor shutdown", "error", err)
+		}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		select {
+		case <-done:
+		default:
+			return errors.Wrap(ctx.Err(), "stop auditor")
+		}
 	}
 
-	if err := a.eg.Wait(); err != nil {
-		logger.Log.Errorw("Error while waiting for auditor to stop", "error", err)
+	for _, c := range a.consumers {
+		if err := c.Stop(ctx); err != nil {
+			return errors.Wrap(err, "stop consumer")
+		}
+		logger.Log.Infof("Consumer %s stopped gracefully", c.GetID())
 	}
-	logger.Log.Info("Auditor stopped")
+
+	return nil
 }
 
 func (a *Auditor) process() error {

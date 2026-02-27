@@ -23,7 +23,7 @@ type Repository interface {
 	GetURL(ctx context.Context, id string) (models.URL, error)
 	GetUserURLs(ctx context.Context, userID uuid.UUID) ([]models.URL, error)
 	DeleteURLs(ctx context.Context, data []models.DeletableURL)
-	Close()
+	Close(ctx context.Context) error
 }
 
 // URLDeleter определяет интерфейс менеджера удаления URL.
@@ -129,8 +129,8 @@ func (s *Service) DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids []st
 }
 
 // Stop останавливает сервис и освобождает ресурсы.
-func (s *Service) Stop() {
-	s.r.Close()
+func (s *Service) Stop(ctx context.Context) error {
+	return s.r.Close(ctx)
 }
 
 func generateID(url string) string {

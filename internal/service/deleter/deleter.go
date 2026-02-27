@@ -2,17 +2,17 @@ package deleter
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/pkg/errors"
 
 	"github.com/dsnikitin/shortener/internal/logger"
 	"github.com/dsnikitin/shortener/internal/models"
 )
 
-const dbRequestSecondsTimeout = 3
+const dbRequestSecondsTimeout = 5
 const flushSecondsInterval = 3
 const batchSize = 100
 const inputWorkers = 5
@@ -30,8 +30,13 @@ type Deleter struct {
 	inputCh  chan models.DeletableURL
 	outputCh chan []models.DeletableURL
 
-	wg     sync.WaitGroup
-	stopCh chan struct{}
+	stopInputWrsCh chan struct{}
+	stopFlusherCh  chan struct{}
+	stopWriterCh   chan struct{}
+
+	inputWrsWg sync.WaitGroup
+	flusherWg  sync.WaitGroup
+	writerWg   sync.WaitGroup
 
 	mu      sync.Mutex
 	buffer  []models.DeletableURL
@@ -41,133 +46,198 @@ type Deleter struct {
 // New создает новый менеджер удаления URL.
 func New(r Repository) *Deleter {
 	m := &Deleter{
-		r:        r,
-		inputCh:  make(chan models.DeletableURL),
-		outputCh: make(chan []models.DeletableURL, 1),
-		stopCh:   make(chan struct{}),
-		buffer:   make([]models.DeletableURL, 0, batchSize),
-		flushCh:  make(chan struct{}, 1),
+		r:              r,
+		inputCh:        make(chan models.DeletableURL),
+		outputCh:       make(chan []models.DeletableURL, 1),
+		stopInputWrsCh: make(chan struct{}),
+		stopFlusherCh:  make(chan struct{}),
+		stopWriterCh:   make(chan struct{}),
+		buffer:         make([]models.DeletableURL, 0, batchSize),
+		flushCh:        make(chan struct{}, 1),
 	}
 
 	m.run()
-
 	return m
 }
 
 // Run запускает менеджер удаления URL.
-func (m *Deleter) run() {
+func (d *Deleter) run() {
 	for range inputWorkers {
-		m.wg.Add(1)
-		go m.inputWorker()
+		d.inputWrsWg.Add(1)
+		go d.inputWorker()
 	}
 
-	m.wg.Add(1)
-	go m.flusher()
+	d.flusherWg.Add(1)
+	go d.flusher()
 
-	m.wg.Add(1)
-	go m.writer()
+	d.writerWg.Add(1)
+	go d.writer()
 }
 
 // Stop останавливает менеджер удаления URL.
-func (m *Deleter) Stop() {
-	close(m.stopCh)
-	m.wg.Wait()
+func (d *Deleter) Stop(ctx context.Context) error {
+	close(d.stopInputWrsCh)
 
-	logger.Log.Info("URL deleter stopped")
-}
+	components := []struct {
+		name       string
+		wg         *sync.WaitGroup
+		nextStopCh chan (struct{})
+	}{
+		{
+			name:       "inputWorkers",
+			wg:         &d.inputWrsWg,
+			nextStopCh: d.stopFlusherCh,
+		},
+		{
+			name:       "flusher",
+			wg:         &d.flusherWg,
+			nextStopCh: d.stopWriterCh,
+		},
+		{
+			name: "writer",
+			wg:   &d.writerWg,
+		},
+	}
 
-// DeleteUserURLs добавляет URLs для удаления.
-func (m *Deleter) DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids []string) error {
-	for _, id := range ids {
+	for _, c := range components {
+		done := make(chan struct{})
+		go func() {
+			c.wg.Wait()
+			close(done)
+		}()
+
 		select {
+		case <-done:
 		case <-ctx.Done():
-			return ctx.Err()
-		case <-m.stopCh:
-			return errors.New("deletion manager stopped")
-		case m.inputCh <- models.DeletableURL{ID: id, CreatorID: userID}:
+			select {
+			case <-done: // всё же успели завершиться
+			default:
+				return errors.Wrapf(ctx.Err(), "stop component %s", c.name)
+			}
+		}
+
+		if c.nextStopCh != nil {
+			close(c.nextStopCh)
 		}
 	}
 
 	return nil
 }
 
-func (m *Deleter) inputWorker() {
-	defer m.wg.Done()
+// DeleteUserURLs добавляет URLs для удаления.
+func (d *Deleter) DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids []string) error {
+	for _, id := range ids {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-d.stopInputWrsCh:
+			return errors.New("deletion manager stopped")
+		case d.inputCh <- models.DeletableURL{ID: id, CreatorID: userID}:
+		}
+	}
+
+	return nil
+}
+
+func (d *Deleter) inputWorker() {
+	defer d.inputWrsWg.Done()
 
 	for {
 		select {
-		case <-m.stopCh:
-			return
-		case data, ok := <-m.inputCh:
-			if !ok {
-				return
+		case url := <-d.inputCh:
+			d.addToBuffer(url)
+		case <-d.stopInputWrsCh:
+			for {
+				select {
+				case url := <-d.inputCh:
+					d.addToBuffer(url)
+				default:
+					return
+				}
 			}
-
-			m.addToBuffer(data)
 		}
 	}
 }
 
-func (m *Deleter) addToBuffer(data models.DeletableURL) {
-	m.mu.Lock()
-	m.buffer = append(m.buffer, data)
-	if len(m.buffer) >= batchSize {
+func (d *Deleter) addToBuffer(data models.DeletableURL) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	d.buffer = append(d.buffer, data)
+	if len(d.buffer) >= batchSize {
 		select {
-		case m.flushCh <- struct{}{}:
+		case d.flushCh <- struct{}{}:
 		default:
 		}
 	}
-	m.mu.Unlock()
 }
 
-func (m *Deleter) flusher() {
-	defer m.wg.Done()
+func (d *Deleter) flusher() {
+	defer d.flusherWg.Done()
 
 	ticker := time.NewTicker(time.Second * flushSecondsInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-m.stopCh:
-			m.flushBuffer()
-			return
 		case <-ticker.C:
-			m.flushBuffer()
-		case <-m.flushCh:
-			m.flushBuffer()
+			d.flushBuffer()
+		case <-d.flushCh:
+			d.flushBuffer()
+		case <-d.stopFlusherCh:
+			d.flushBuffer()
+			return
 		}
 	}
 }
 
-func (m *Deleter) flushBuffer() {
-	m.mu.Lock()
-	if len(m.buffer) == 0 {
-		m.mu.Unlock()
+func (d *Deleter) flushBuffer() {
+	d.mu.Lock()
+	if len(d.buffer) == 0 {
+		d.mu.Unlock()
 		return
 	}
 
-	batch := m.buffer
-	m.buffer = make([]models.DeletableURL, 0, batchSize)
-	m.mu.Unlock()
+	batch := d.buffer
+	d.buffer = make([]models.DeletableURL, 0, batchSize)
+	d.mu.Unlock()
 
-	m.outputCh <- batch
+	d.outputCh <- batch
 }
 
-func (m *Deleter) writer() {
-	defer m.wg.Done()
+func (d *Deleter) writer() {
+	defer d.writerWg.Done()
 
 	for {
 		select {
-		case <-m.stopCh:
-			return
-		case batch, ok := <-m.outputCh:
-			if !ok {
-				return
+		case urls := <-d.outputCh:
+			d.processBatch(urls)
+		case <-d.stopWriterCh:
+			for {
+				select {
+				case urls := <-d.outputCh:
+					d.processBatch(urls)
+				default:
+					return
+				}
 			}
-
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second*dbRequestSecondsTimeout)
-			m.r.DeleteURLs(ctx, batch)
-			cancel()
 		}
+	}
+}
+
+func (d *Deleter) processBatch(urls []models.DeletableURL) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*dbRequestSecondsTimeout)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		d.r.DeleteURLs(ctx, urls)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		logger.Log.Warnw("Failed to delete urls due to context timeout", "urls", urls)
 	}
 }

@@ -34,7 +34,7 @@ func main() {
 	app := newApp(cfg)
 
 	shutdownSignal := make(chan os.Signal, 1)
-	signal.Notify(shutdownSignal, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
+	signal.Notify(shutdownSignal, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 
 	go app.start()
 

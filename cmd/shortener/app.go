@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"database/sql"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -47,19 +48,19 @@ func newApp(cfg *config.Config) *app {
 		}
 	}
 
-	storage, err := initStorage(cfg, pgxPool)
+	r, err := initRepo(cfg, pgxPool)
 	if err != nil {
-		logger.Log.Fatalw("Failed to init storage", "error", err)
+		logger.Log.Fatalw("Failed to init repo", "error", err)
 	}
 
-	urlDeleter := deleter.New(storage)
+	urlDeleter := deleter.New(r)
 
 	auditor, err := initAuditor(cfg.Audit)
 	if err != nil {
 		logger.Log.Fatalw("Failed to init auditor", "error", err)
 	}
 
-	s := service.New(storage, urlDeleter)
+	s := service.New(r, urlDeleter)
 	h := handler.New(cfg.ShortURLBaseAddr, s, auditor)
 
 	router := initChiRouter(cfg, h)
@@ -96,19 +97,49 @@ func (a *app) start() {
 }
 
 func (a *app) shutdown() {
-	a.service.Stop()
-	a.urlDeleter.Stop()
-	a.auditor.Stop()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	if err := a.server.Shutdown(ctx); err != nil {
-		logger.Log.Errorw("Server graceful shutdown failed", "error", err)
-		return
+	components := []struct {
+		name    string
+		timeout time.Duration
+		stopFn  func(ctx context.Context) error
+	}{
+		{
+			// останавливаем первым, чтобы не принимать новые запросы
+			name:    "Server",
+			stopFn:  a.server.Shutdown,
+			timeout: time.Second * 30,
+		},
+		{
+			// останавливаем вторым, ему нужен еще не закрытый репозиторий
+			name:    "URL deleter",
+			stopFn:  a.urlDeleter.Stop,
+			timeout: time.Second * 30,
+		},
+		{
+			// останавливаем третьим, закрываем репозиторий
+			name:    "Service",
+			stopFn:  a.service.Stop,
+			timeout: time.Second * 30,
+		},
+		{
+			// останавливаем последним, он записывает свершившиеся события
+			name:    "Auditor",
+			stopFn:  a.auditor.Stop,
+			timeout: time.Second * 30,
+		},
 	}
 
-	logger.Log.Infow("Shutdown successfully completed")
+	for _, c := range components {
+		ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+
+		logger.Log.Infof("Stopping %s...", c.name)
+		if err := c.stopFn(ctx); err != nil {
+			logger.Log.Errorw(fmt.Sprintf("Failed to stop %s", c.name), "error", err)
+		} else {
+			logger.Log.Infof("%s stopped gracefully", c.name)
+		}
+
+		cancel()
+	}
 }
 
 func applyMigrations(cfg *db.Config) error {
@@ -139,7 +170,7 @@ func applyMigrations(cfg *db.Config) error {
 	return nil
 }
 
-func initStorage(cfg *config.Config, db *pgxpool.Pool) (service.Repository, error) {
+func initRepo(cfg *config.Config, db *pgxpool.Pool) (service.Repository, error) {
 	switch {
 	case db != nil:
 		return repository.NewPostgres(db), nil
