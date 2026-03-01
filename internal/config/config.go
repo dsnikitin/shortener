@@ -47,7 +47,7 @@ func New() (*Config, error) {
 	}
 
 	flag.StringVar(&cfg.ServerAddr, "a", "localhost:8080", "server host:port")
-	flag.StringVar(&cfg.ShortURLBaseAddr, "b", "https://localhost:8080", "base short url")
+	flag.StringVar(&cfg.ShortURLBaseAddr, "b", "http://localhost:8080", "base short url")
 	flag.StringVar(&cfg.LogLevel, "l", "info", "log level")
 	flag.StringVar(&cfg.FileStoragePath, "f", "shortener_storage.json", "file storage path")
 	flag.BoolVar(&cfg.IsDevelop, "dev", false, "is develop environment")

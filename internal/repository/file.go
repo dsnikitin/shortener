@@ -82,7 +82,7 @@ func (r *File) Save(ctx context.Context, url models.URL) error {
 		}
 		r.mu.Unlock()
 
-		// отправляем на запсиь в файл
+		// отправляем на запись в файл
 		r.queue <- url
 		return nil
 	}
