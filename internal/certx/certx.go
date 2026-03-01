@@ -26,7 +26,7 @@ var (
 
 // CheckCert проверяет сертификат.
 func CheckCert(certFilePath, keyFilePath string) error {
-	certBytes, err := os.ReadFile(certFilePath)
+	certBytes, err := os.ReadFile(certFilePath) // #nosec G304
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return ErrCertFileNotFound
@@ -34,7 +34,7 @@ func CheckCert(certFilePath, keyFilePath string) error {
 		return errors.Wrap(err, "read certificate file")
 	}
 
-	keyBytes, err := os.ReadFile(keyFilePath)
+	keyBytes, err := os.ReadFile(keyFilePath) // #nosec G304
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return ErrKeyFileNotFound
@@ -97,11 +97,11 @@ func GenerateSelfSignedCert(certFilePath, privateKeyFilePath string) error {
 		return errors.Wrap(err, "encode certificate")
 	}
 
-	if err := os.MkdirAll(filepath.Dir(certFilePath), 0755); err != nil {
+	if err = os.MkdirAll(filepath.Dir(certFilePath), 0750); err != nil {
 		return errors.Wrap(err, "make cert file dirs")
 	}
 
-	if err = os.WriteFile(certFilePath, certPEM.Bytes(), 0644); err != nil {
+	if err = os.WriteFile(certFilePath, certPEM.Bytes(), 0600); err != nil {
 		return errors.Wrap(err, "write certificate file")
 	}
 
@@ -115,11 +115,11 @@ func GenerateSelfSignedCert(certFilePath, privateKeyFilePath string) error {
 			return errors.Wrap(err, "encode private key")
 		}
 
-		if err := os.MkdirAll(filepath.Dir(privateKeyFilePath), 0755); err != nil {
+		if err = os.MkdirAll(filepath.Dir(privateKeyFilePath), 0750); err != nil {
 			return errors.Wrap(err, "make private key file dirs")
 		}
 
-		if err = os.WriteFile(privateKeyFilePath, keyPEM.Bytes(), 0644); err != nil {
+		if err = os.WriteFile(privateKeyFilePath, keyPEM.Bytes(), 0600); err != nil {
 			return errors.Wrap(err, "write private key file")
 		}
 	}
@@ -129,7 +129,7 @@ func GenerateSelfSignedCert(certFilePath, privateKeyFilePath string) error {
 
 // getOrCreatePrivateKey Возвращает существующий или создает новый приватный ключ.
 func getOrCreatePrivateKey(privateKeyFilePath string) (*rsa.PrivateKey, bool, error) {
-	keyBytes, err := os.ReadFile(privateKeyFilePath)
+	keyBytes, err := os.ReadFile(privateKeyFilePath) // #nosec G304
 	switch {
 	case err == nil:
 		keyPemBlock, _ := pem.Decode(keyBytes)

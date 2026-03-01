@@ -3,8 +3,8 @@ package config
 import (
 	"encoding/json"
 	"flag"
+	"net/url"
 	"os"
-	"strings"
 
 	"dario.cat/mergo"
 	"github.com/caarlos0/env"
@@ -47,7 +47,7 @@ func New() (*Config, error) {
 	}
 
 	flag.StringVar(&cfg.ServerAddr, "a", "localhost:8080", "server host:port")
-	flag.StringVar(&cfg.ShortURLBaseAddr, "b", "http://localhost:8080", "base short url")
+	flag.StringVar(&cfg.ShortURLBaseAddr, "b", "https://localhost:8080", "base short url")
 	flag.StringVar(&cfg.LogLevel, "l", "info", "log level")
 	flag.StringVar(&cfg.FileStoragePath, "f", "shortener_storage.json", "file storage path")
 	flag.BoolVar(&cfg.IsDevelop, "dev", false, "is develop environment")
@@ -76,9 +76,11 @@ func New() (*Config, error) {
 	}
 
 	if cfg.EnableHTTPS {
-		cfg.ServerAddr = strings.Replace(cfg.ServerAddr, ":8080", ":8443", 1)
-		cfg.ShortURLBaseAddr = strings.Replace(cfg.ShortURLBaseAddr, "http://", "https://", 1)
-		cfg.ShortURLBaseAddr = strings.Replace(cfg.ShortURLBaseAddr, ":8080", ":8443", 1)
+		if baseURL, err := url.Parse(cfg.ShortURLBaseAddr); err != nil {
+			return nil, errors.Wrap(err, "parse short url base address")
+		} else if baseURL.Scheme != "https" {
+			return nil, errors.New("Short url base address must use https scheme")
+		}
 
 		if cfg.CertFilePath == "" {
 			return nil, errors.New("empty cert file path")
@@ -104,7 +106,7 @@ func loadFromJSONFile(cfg *Config) error {
 		Audit:    &audit.Config{},
 	}
 
-	if err := json.Unmarshal(data, &fileCfg); err != nil {
+	if err = json.Unmarshal(data, &fileCfg); err != nil {
 		return errors.Wrap(err, "unmarshal config file data")
 	}
 
