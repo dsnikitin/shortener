@@ -31,7 +31,9 @@ func (m *MockRepository) SaveMany(ctx context.Context, urls []models.URL) error 
 	return m.Called().Error(0)
 }
 func (m *MockRepository) DeleteURLs(ctx context.Context, data []models.DeletableURL) {}
-func (m *MockRepository) Close()                                                     {}
+func (m *MockRepository) Close(ctx context.Context) error {
+	return nil
+}
 
 type MockURLDeleter struct {
 	mock.Mock

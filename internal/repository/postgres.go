@@ -153,12 +153,10 @@ const deleteUserURLsSQL = `
 func (r *Postgres) DeleteURLs(ctx context.Context, urls []models.DeletableURL) {
 	batch := &pgx.Batch{}
 	for i := range urls {
-		batch.Queue(deleteUserURLsSQL,
-			pgx.NamedArgs{
-				"id":        urls[i].ID,
-				"creatorID": urls[i].CreatorID,
-			},
-		)
+		batch.Queue(deleteUserURLsSQL, pgx.NamedArgs{
+			"id":        urls[i].ID,
+			"creatorID": urls[i].CreatorID,
+		})
 	}
 
 	br := r.db.SendBatch(ctx, batch)
@@ -173,6 +171,7 @@ func (r *Postgres) DeleteURLs(ctx context.Context, urls []models.DeletableURL) {
 }
 
 // Close закрывает соединение с PostgreSQL.
-func (r *Postgres) Close() {
+func (r *Postgres) Close(context.Context) error {
 	r.db.Close()
+	return nil
 }

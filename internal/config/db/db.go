@@ -12,7 +12,7 @@ import (
 
 // Config содержит конфигурацию подключения к базе данных.
 type Config struct {
-	DSN string `env:"DSN"`
+	DSN string `env:"DSN" json:"dsn"`
 }
 
 // New создает пул соединений с базой данных PostgreSQL.

@@ -10,28 +10,31 @@ import (
 	"github.com/dsnikitin/shortener/internal/logger"
 )
 
+// заполнится при линковке с флагом
 var (
-	buildVersion string // -ldflags -X main.buildVersion=v1.0.0
-	buildDate    string // -ldflags -X 'main.buildDate=$(Get-Date -Format 'dd/MM/yyy HH:mm:ss')' для powershell
-	buildCommit  string // -ldflags -X main.buildCommit=$(git rev-parse HEAD)
+	buildVersion string = "N/A" // -ldflags "-X main.buildVersion=v1.0.0"
+	buildDate    string = "N/A" // -ldflags "-X 'main.buildDate=$(Get-Date -Format 'dd/MM/yyy HH:mm:ss')'" для powershell
+	buildCommit  string = "N/A" // -ldflags "-X main.buildCommit=$(git rev-parse HEAD)"
 )
 
 func main() {
-	logBuildInfo()
+	log.Println("Build version: ", buildVersion)
+	log.Println("Build date: ", buildDate)
+	log.Println("Build commit: ", buildCommit)
 
 	cfg, err := config.New()
 	if err != nil {
-		log.Fatalf("config init error: %s", err)
+		log.Fatalf("Failed to init config: %s", err)
 	}
 
 	if err := logger.Initialize(cfg.LogLevel); err != nil {
-		log.Fatalf("logger init error: %s", err)
+		log.Fatalf("Failed to init logger: %s", err)
 	}
 
 	app := newApp(cfg)
 
 	shutdownSignal := make(chan os.Signal, 1)
-	signal.Notify(shutdownSignal, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
+	signal.Notify(shutdownSignal, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 
 	go app.start()
 
@@ -39,20 +42,4 @@ func main() {
 
 	logger.Log.Infow("Received shutdown signal")
 	app.shutdown()
-}
-
-func logBuildInfo() {
-	if buildVersion == "" {
-		buildVersion = "N/A"
-	}
-	if buildDate == "" {
-		buildDate = "N/A"
-	}
-	if buildCommit == "" {
-		buildCommit = "N/A"
-	}
-
-	log.Println("Build version: ", buildVersion)
-	log.Println("Build date: ", buildDate)
-	log.Println("Build commit: ", buildCommit)
 }

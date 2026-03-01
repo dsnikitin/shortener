@@ -1,0 +1,21 @@
+{
+	"server_address": "localhost:8081",
+	"base_url": "http://localhost",
+	"log_level": "debug",
+	"file_storage_path": "storage.json",
+	"jwt_signing_key": "some_secret_key",
+	"is_develop": true,
+	"enable_https": true,
+	"cert_file_path": "./certs/cert.pem",
+	"private_key_file_path": "./certs/key.pem",
+	"audit": {
+		"file": "audit_file.json",
+		"url": "",
+		"events_limit": 2000,
+		"file_consumer_id": "file_consumer_2",
+		"remote_consumer_id": "remote_consumer_2"
+	},
+	"database": {
+		"dns": "some_database_dns"
+	}
+}

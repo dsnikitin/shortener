@@ -1,6 +1,9 @@
 package consumer
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 
@@ -34,12 +37,28 @@ func (c *Consumer) Consume(event models.Event) error {
 }
 
 // Stop останавливает потребителя, завершая все горутины и ожидая их завершения.
-func (c *Consumer) Stop() {
+func (c *Consumer) Stop(ctx context.Context) error {
 	close(c.shutdown)
-	if err := c.eg.Wait(); err != nil {
-		logger.Log.Errorw("Error waiting for consumer to stop", "error", err)
+
+	done := make(chan struct{})
+	go func() {
+		if err := c.eg.Wait(); err != nil {
+			logger.Log.Errorw(fmt.Sprintf("Error while waiting for consumer %s shutdown", c.id), "error", err)
+		}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		select {
+		case <-done:
+		default:
+			return errors.Wrapf(ctx.Err(), "stop consumer %s", c.id)
+		}
 	}
-	logger.Log.Infof("Consumer %s stopped", c.id)
+
+	return nil
 }
 
 func (c *Consumer) process(fn func(event models.Event) error) error {
@@ -54,7 +73,7 @@ func (c *Consumer) process(fn func(event models.Event) error) error {
 				select {
 				case event := <-c.events:
 					if err := fn(event); err != nil {
-						logger.Log.Errorw("Failed to process event while shuting down", "event", event, "error", err)
+						logger.Log.Errorw("Failed to process event while shutting down", "event", event, "error", err)
 					}
 				default:
 					return nil
