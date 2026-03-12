@@ -73,3 +73,12 @@ type Event struct {
 	UserID      string `json:"user_id,omitempty"`
 	OriginalURL string `json:"url"`
 }
+
+// Stats представляет статистику по сервиса.
+// generate:reset
+type Stats struct {
+	// количество сокращённых URL в сервисе
+	URLs int `json:"urls"`
+	// количество пользователей в сервисе
+	Users int `json:"users"`
+}

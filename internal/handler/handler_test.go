@@ -58,6 +58,11 @@ func (m *MockService) DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids 
 	return m.Called(userID).Error(0)
 }
 
+func (m *MockService) GetStats(ctx context.Context) (models.Stats, error) {
+	args := m.Called()
+	return args.Get(0).(models.Stats), args.Error(1)
+}
+
 type MockAuditor struct {
 	mock.Mock
 }

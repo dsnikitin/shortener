@@ -23,6 +23,7 @@ type Repository interface {
 	GetURL(ctx context.Context, id string) (models.URL, error)
 	GetUserURLs(ctx context.Context, userID uuid.UUID) ([]models.URL, error)
 	DeleteURLs(ctx context.Context, data []models.DeletableURL)
+	GetStats(ctx context.Context) (models.Stats, error)
 	Close(ctx context.Context) error
 }
 
@@ -126,6 +127,10 @@ func (s *Service) GetUserURLs(ctx context.Context, userID uuid.UUID) ([]models.U
 // DeleteUserURLs помечает указанные URLs пользователя как удаленные.
 func (s *Service) DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids []string) error {
 	return s.d.DeleteUserURLs(ctx, userID, ids)
+}
+
+func (s *Service) GetStats(ctx context.Context) (models.Stats, error) {
+	return s.r.GetStats(ctx)
 }
 
 // Stop останавливает сервис и освобождает ресурсы.

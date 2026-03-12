@@ -26,6 +26,7 @@ type Service interface {
 	PingDB(ctx context.Context) error
 	GetUserURLs(ctx context.Context, userID uuid.UUID) ([]models.URL, error)
 	DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids []string) error
+	GetStats(ctx context.Context) (models.Stats, error)
 }
 
 // Auditor определяет интерфейс аудитора событий.
@@ -325,6 +326,22 @@ func (h *Handler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusAccepted)
+}
+
+func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := h.s.GetStats(r.Context())
+	if err != nil {
+		logger.Log.Errorw("Get stats", "error", err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(stats); err != nil {
+		logger.Log.Errorw("Encoding stats response", "error", err)
+		return
+	}
 }
 
 func (h *Handler) sendBatchResponse(

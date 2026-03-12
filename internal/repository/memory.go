@@ -75,6 +75,9 @@ func (r *Memory) GetURL(ctx context.Context, id string) (models.URL, error) {
 
 // GetUserURLs возвращает все URLs пользователя.
 func (r *Memory) GetUserURLs(ctx context.Context, userID uuid.UUID) ([]models.URL, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	var res []models.URL
 
 	ids, ok := r.userURLs[userID]
@@ -97,6 +100,7 @@ func (r *Memory) DeleteURLs(ctx context.Context, deletableURLs []models.Deletabl
 			logger.Log.Warnw("Failed to delete urls because request context done", "not deleted urls", deletableURLs[i:])
 			return
 		default:
+			r.mu.Lock()
 			if ids, ok := r.userURLs[deletableURL.CreatorID]; ok {
 				if _, ok := ids[deletableURL.ID]; ok {
 					if url, ok := r.urls[deletableURL.ID]; ok {
@@ -105,8 +109,19 @@ func (r *Memory) DeleteURLs(ctx context.Context, deletableURLs []models.Deletabl
 					}
 				}
 			}
+			r.mu.Unlock()
 		}
 	}
+}
+
+func (r *Memory) GetStats(ctx context.Context) (models.Stats, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return models.Stats{
+		URLs:  len(r.urls),
+		Users: len(r.userURLs),
+	}, nil
 }
 
 // PingDB проверяет соединение с хранилищем (не реализовано для хранилища в памяти).

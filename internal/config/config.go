@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"flag"
+	"net"
 	"net/url"
 	"os"
 
@@ -36,6 +37,8 @@ type Config struct {
 	PrivateKeyFilePath string        `env:"PRIVATE_KEY_FILE_PATH" json:"private_key_file_path"`
 	DataBase           *db.Config    `envPrefix:"DATABASE_" json:"database"`
 	Audit              *audit.Config `envPrefix:"AUDIT_" json:"audit"`
+	TrustedSubnetCIDR  string        `env:"TRUSTED_SUBNET" json:"trusted_subnet"`
+	TrustedSubnet      *net.IPNet    `env:"-" json:"-"`
 	ConfigFilePath     string        `env:"CONFIG" json:"-"`
 }
 
@@ -47,7 +50,7 @@ func New() (*Config, error) {
 	}
 
 	flag.StringVar(&cfg.ServerAddr, "a", "localhost:8080", "server host:port")
-	flag.StringVar(&cfg.ShortURLBaseAddr, "b", "https://localhost:8080", "base short url")
+	flag.StringVar(&cfg.ShortURLBaseAddr, "b", "http://localhost:8080", "base short url")
 	flag.StringVar(&cfg.LogLevel, "l", "info", "log level")
 	flag.StringVar(&cfg.FileStoragePath, "f", "shortener_storage.json", "file storage path")
 	flag.BoolVar(&cfg.IsDevelop, "dev", false, "is develop environment")
@@ -61,6 +64,7 @@ func New() (*Config, error) {
 	flag.StringVar(&cfg.CertFilePath, "cert-file", "", "path to file with cert for https")
 	flag.StringVar(&cfg.PrivateKeyFilePath, "key-file", "", "path to file with private key for https")
 	flag.StringVar(&cfg.ConfigFilePath, "c", "", "path to config file")
+	flag.StringVar(&cfg.TrustedSubnetCIDR, "t", "", "trusted subnet in CIDR format")
 	flag.StringVar(&cfg.ConfigFilePath, "config", "", "path to config file")
 
 	flag.Parse()
@@ -71,7 +75,8 @@ func New() (*Config, error) {
 		}
 	}
 
-	if err := env.Parse(cfg); err != nil {
+	err := env.Parse(cfg)
+	if err != nil {
 		return nil, errors.Wrap(err, "parse envs")
 	}
 
@@ -88,6 +93,12 @@ func New() (*Config, error) {
 
 		if cfg.PrivateKeyFilePath == "" {
 			return nil, errors.New("empty private key file path")
+		}
+	}
+
+	if cfg.TrustedSubnetCIDR != "" {
+		if _, cfg.TrustedSubnet, err = net.ParseCIDR(cfg.TrustedSubnetCIDR); err != nil {
+			return nil, errors.Wrap(err, "parse trusted subnet")
 		}
 	}
 

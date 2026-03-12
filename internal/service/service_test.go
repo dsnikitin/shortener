@@ -31,6 +31,10 @@ func (m *MockRepository) SaveMany(ctx context.Context, urls []models.URL) error 
 	return m.Called().Error(0)
 }
 func (m *MockRepository) DeleteURLs(ctx context.Context, data []models.DeletableURL) {}
+func (m *MockRepository) GetStats(ctx context.Context) (models.Stats, error) {
+	args := m.Called()
+	return args.Get(0).(models.Stats), args.Error(1)
+}
 func (m *MockRepository) Close(ctx context.Context) error {
 	return nil
 }
