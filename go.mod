@@ -1,6 +1,6 @@
 module github.com/dsnikitin/shortener
 
-go 1.24.8
+go 1.25.0
 
 require (
 	github.com/golang-jwt/jwt/v4 v4.5.2
