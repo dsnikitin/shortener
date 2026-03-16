@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"time"
 
 	pb "github.com/dsnikitin/shortener/api/proto" // путь к сгенерированным proto файлам
 	"github.com/dsnikitin/shortener/internal/config"
@@ -40,11 +41,12 @@ func (h *GRPCHandler) ShortenURL(ctx context.Context, req *pb.URLShortenRequest)
 		return nil, err
 	}
 
-	if req.GetUrl() == "" {
+	originalURL := req.GetUrl()
+	if originalURL == "" {
 		return nil, status.Error(codes.InvalidArgument, "empty url")
 	}
 
-	id, err := h.s.CreateID(ctx, userID, req.GetUrl())
+	id, err := h.s.CreateID(ctx, userID, originalURL)
 	if err != nil {
 		var aeErr *errx.ErrAlreadyExists
 		if !errors.As(err, &aeErr) {
@@ -52,11 +54,16 @@ func (h *GRPCHandler) ShortenURL(ctx context.Context, req *pb.URLShortenRequest)
 			return nil, status.Error(codes.Internal, "internal server error")
 		}
 
-		// URL уже существует - возвращаем существующий ID с кодом AlreadyExists
-		return pb.URLShortenResponse_builder{
-			Result: h.shortURLBaseAddr + "/" + aeErr.URL.ID,
-		}.Build(), status.Error(codes.AlreadyExists, "url already exists")
+		// URL уже существует - возвращаем в тексте ошибки существующий ID
+		return nil, status.Error(codes.AlreadyExists, h.shortURLBaseAddr+"/"+aeErr.URL.ID)
 	}
+
+	h.auditor.PublishEvent(models.Event{
+		Timestamp:   time.Now().Unix(),
+		Action:      models.Shorten,
+		UserID:      userID.String(),
+		OriginalURL: originalURL,
+	})
 
 	return pb.URLShortenResponse_builder{
 		Result: h.shortURLBaseAddr + "/" + id,
@@ -78,6 +85,12 @@ func (h *GRPCHandler) ExpandURL(ctx context.Context, req *pb.URLExpandRequest) (
 		}
 		return nil, status.Error(codes.NotFound, err.Error())
 	}
+
+	h.auditor.PublishEvent(models.Event{
+		Timestamp:   time.Now().Unix(),
+		Action:      models.Follow,
+		OriginalURL: url.Original,
+	})
 
 	if url.IsDeleted {
 		return nil, status.Error(codes.FailedPrecondition, "url is deleted")

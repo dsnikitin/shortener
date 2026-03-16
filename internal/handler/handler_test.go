@@ -7,19 +7,29 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 
+	pb "github.com/dsnikitin/shortener/api/proto"
 	"github.com/dsnikitin/shortener/internal/config"
 	"github.com/dsnikitin/shortener/internal/errx"
 	"github.com/dsnikitin/shortener/internal/handler"
+	"github.com/dsnikitin/shortener/internal/middleware"
 	"github.com/dsnikitin/shortener/internal/models"
 )
 
@@ -69,7 +79,7 @@ type MockAuditor struct {
 
 func (m *MockAuditor) PublishEvent(models.Event) {}
 
-func TestHandler_Shorten(t *testing.T) {
+func TestHTTPHandler_Shorten(t *testing.T) {
 	userID := uuid.New()
 
 	type headers struct {
@@ -177,7 +187,7 @@ func TestHandler_Shorten(t *testing.T) {
 	}
 }
 
-func ExampleHandler_Shorten() {
+func ExampleHTTPHandler_Shorten() {
 	userID := uuid.New()
 	originalURL := "https://practicum.yandex.ru"
 
@@ -205,7 +215,7 @@ func ExampleHandler_Shorten() {
 	// http://localhost:8080/abcdefg
 }
 
-func TestHandler_ShortenFromJSON(t *testing.T) {
+func TestHTTPHandler_ShortenFromJSON(t *testing.T) {
 	userID := uuid.New()
 
 	type headers struct {
@@ -324,7 +334,7 @@ func TestHandler_ShortenFromJSON(t *testing.T) {
 	}
 }
 
-func ExampleHandler_ShortenFromJSON() {
+func ExampleHTTPHandler_ShortenFromJSON() {
 	userID := uuid.New()
 	req := models.ShortenRequest{URL: "https://practicum.yandex.ru"}
 
@@ -360,7 +370,7 @@ func ExampleHandler_ShortenFromJSON() {
 	// http://localhost:8080/abcdefg
 }
 
-func TestHandler_Redirect(t *testing.T) {
+func TestHTTPHandler_Redirect(t *testing.T) {
 	type headers struct {
 		contentType string
 		location    string
@@ -476,7 +486,7 @@ func TestHandler_Redirect(t *testing.T) {
 	}
 }
 
-func ExampleHandler_Redirect() {
+func ExampleHTTPHandler_Redirect() {
 	short := "abcdefg"
 	url := models.URL{ID: short, Original: "https://practicum.yandex.ru"}
 
@@ -501,7 +511,7 @@ func ExampleHandler_Redirect() {
 	// https://practicum.yandex.ru
 }
 
-func TestHandler_PingDB(t *testing.T) {
+func TestHTTPHandler_PingDB(t *testing.T) {
 	type want struct {
 		code        int
 		contentType string
@@ -572,7 +582,7 @@ func TestHandler_PingDB(t *testing.T) {
 	}
 }
 
-func TestHandler_ShortenBatch(t *testing.T) {
+func TestHTTPHandler_ShortenBatch(t *testing.T) {
 	userID := uuid.New()
 
 	type headers struct {
@@ -724,7 +734,7 @@ func TestHandler_ShortenBatch(t *testing.T) {
 	}
 }
 
-func ExampleHandler_ShortenBatch() {
+func ExampleHTTPHandler_ShortenBatch() {
 	userID := uuid.New()
 	req := []models.ShortenBatchRequest{
 		{CorrelationID: "1", OriginalURL: "http://bstoudwr.biz/ray1dv90xyg"},
@@ -767,7 +777,7 @@ func ExampleHandler_ShortenBatch() {
 	// http://localhost:8080/abcdefg
 }
 
-func TestHandler_GetUserURLs(t *testing.T) {
+func TestHTTPHandler_GetUserURLs(t *testing.T) {
 	userID := uuid.New()
 
 	type headers struct {
@@ -912,7 +922,7 @@ func TestHandler_GetUserURLs(t *testing.T) {
 	}
 }
 
-func ExampleHandler_GetUserURLs() {
+func ExampleHTTPHandler_GetUserURLs() {
 	userID := uuid.New()
 
 	service := new(MockService)
@@ -948,4 +958,329 @@ func ExampleHandler_GetUserURLs() {
 	// Output:
 	// http://localhost:8080/gfedcba http://bstoudwr.biz/ray1dv90xyg
 	// http://localhost:8080/abcdefg https://practicum.yandex.ru
+}
+
+func TestGRPCHandler_ShortenURL(t *testing.T) {
+	userID := uuid.New()
+
+	cfg := &config.Config{
+		GRPCServerAddr:   "localhost:8080",
+		ShortURLBaseAddr: "http://localhost:8080",
+		JWTSigningKey:    "some-secret-key",
+	}
+
+	s := new(MockService)
+	h := handler.NewGRPCHandler(cfg.ShortURLBaseAddr, s, new(MockAuditor))
+	serverStopFn := startGRPCServer(t, cfg, h)
+	defer serverStopFn()
+
+	client, conn := initGRPCClient(t, cfg)
+	defer conn.Close()
+
+	md := initMetaData(t, cfg, userID)
+
+	type want struct {
+		code   codes.Code
+		result string
+	}
+
+	tests := []struct {
+		name             string
+		userID           string
+		reqBody          string
+		servicesMockCall func()
+		want             want
+	}{
+		{
+			name:    "positive",
+			userID:  userID.String(),
+			reqBody: "https://practicum.yandex.ru/",
+			servicesMockCall: func() {
+				s.On("CreateID", userID, "https://practicum.yandex.ru/").Return("abcdefg", nil).Once()
+			},
+			want: want{
+				code:   codes.OK,
+				result: "http://localhost:8080/abcdefg",
+			},
+		},
+		{
+			name:             "empty body",
+			userID:           userID.String(),
+			reqBody:          "",
+			servicesMockCall: func() {},
+			want: want{
+				code:   codes.InvalidArgument,
+				result: "empty url",
+			},
+		},
+		{
+			name:    "already exist",
+			userID:  userID.String(),
+			reqBody: "https://practicum.yandex.ru/",
+			servicesMockCall: func() {
+				url := models.URL{ID: "abcdefg", Original: "https://practicum.yandex.ru/"}
+				err := errx.NewAlreadyExistsError(url, errors.New("already exists"))
+				s.On("CreateID", userID, "https://practicum.yandex.ru/").Return("", err).Once()
+			},
+			want: want{
+				code:   codes.AlreadyExists,
+				result: "http://localhost:8080/abcdefg",
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.servicesMockCall()
+
+			ctx := metadata.NewOutgoingContext(context.Background(), md)
+			resp, err := client.ShortenURL(ctx, pb.URLShortenRequest_builder{
+				Url: test.reqBody,
+			}.Build())
+
+			statusCode := status.Code(err)
+			assert.Equal(t, test.want.code, statusCode)
+
+			switch statusCode {
+			case codes.OK:
+				assert.Equal(t, test.want.result, resp.GetResult())
+			default:
+				assert.Equal(t, test.want.result, status.Convert(err).Message())
+			}
+		})
+	}
+}
+
+func TestGRPCHandler_ExpandURL(t *testing.T) {
+	userID := uuid.New()
+
+	cfg := &config.Config{
+		GRPCServerAddr:   "localhost:8080",
+		ShortURLBaseAddr: "http://localhost:8080",
+		JWTSigningKey:    "some-secret-key",
+	}
+
+	s := new(MockService)
+	h := handler.NewGRPCHandler(cfg.ShortURLBaseAddr, s, new(MockAuditor))
+	serverStopFn := startGRPCServer(t, cfg, h)
+	defer serverStopFn()
+
+	client, conn := initGRPCClient(t, cfg)
+	defer conn.Close()
+
+	md := initMetaData(t, cfg, userID)
+
+	type want struct {
+		code   codes.Code
+		result string
+	}
+
+	tests := []struct {
+		name             string
+		urlID            string
+		reqBody          string
+		servicesMockCall func()
+		want             want
+	}{
+		{
+			name:  "positive",
+			urlID: "abcdefg",
+			servicesMockCall: func() {
+				url := models.URL{ID: "abcdefg", Original: "https://practicum.yandex.ru"}
+				s.On("GetURL", "abcdefg").Return(url, nil).Once()
+			},
+			want: want{
+				code:   codes.OK,
+				result: "https://practicum.yandex.ru",
+			},
+		},
+		{
+			name:             "empty id",
+			urlID:            "",
+			servicesMockCall: func() {},
+			want: want{
+				code:   codes.InvalidArgument,
+				result: "incorrect id",
+			},
+		},
+		{
+			name:             "too large id",
+			urlID:            "abcdefghi",
+			servicesMockCall: func() {},
+			want: want{
+				code:   codes.InvalidArgument,
+				result: "incorrect id",
+			},
+		},
+		{
+			name:  "not found",
+			urlID: "gfedcba",
+			servicesMockCall: func() {
+				s.On("GetURL", "gfedcba").Return(models.URL{}, errx.ErrNotFound).Once()
+			},
+			want: want{
+				code:   codes.NotFound,
+				result: "id not found",
+			},
+		},
+		{
+			name:  "gone",
+			urlID: "abcdefg",
+			servicesMockCall: func() {
+				url := models.URL{ID: "abcdefg", Original: "https://practicum.yandex.ru", IsDeleted: true}
+				s.On("GetURL", "abcdefg").Return(url, nil).Once()
+			},
+			want: want{
+				code:   codes.FailedPrecondition,
+				result: "url is deleted",
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.servicesMockCall()
+
+			ctx := metadata.NewOutgoingContext(context.Background(), md)
+			resp, err := client.ExpandURL(ctx, pb.URLExpandRequest_builder{
+				Id: test.urlID,
+			}.Build())
+
+			statusCode := status.Code(err)
+			assert.Equal(t, test.want.code, statusCode)
+
+			switch statusCode {
+			case codes.OK:
+				assert.Equal(t, test.want.result, resp.GetResult())
+			default:
+				assert.Equal(t, test.want.result, status.Convert(err).Message())
+			}
+		})
+	}
+}
+
+func TestGRPCHandler_ListUserURLs(t *testing.T) {
+	userID := uuid.New()
+
+	cfg := &config.Config{
+		GRPCServerAddr:   "localhost:8080",
+		ShortURLBaseAddr: "http://localhost:8080",
+		JWTSigningKey:    "some-secret-key",
+	}
+
+	s := new(MockService)
+	h := handler.NewGRPCHandler(cfg.ShortURLBaseAddr, s, new(MockAuditor))
+	serverStopFn := startGRPCServer(t, cfg, h)
+	defer serverStopFn()
+
+	client, conn := initGRPCClient(t, cfg)
+	defer conn.Close()
+
+	md := initMetaData(t, cfg, userID)
+
+	type want struct {
+		code   codes.Code
+		errMsg string
+		result []*pb.URLData
+	}
+
+	tests := []struct {
+		name             string
+		userID           string
+		reqBody          string
+		servicesMockCall func()
+		want             want
+	}{
+		{
+			name:   "positive with urls",
+			userID: userID.String(),
+			servicesMockCall: func() {
+				urls := []models.URL{
+					{ID: "gfedcba", Original: "http://bstoudwr.biz/ray1dv90xyg"},
+					{ID: "abcdefg", Original: "https://practicum.yandex.ru/"},
+				}
+				s.On("GetUserURLs", userID).Return(urls, nil).Once()
+			},
+			want: want{
+				code: codes.OK,
+				result: []*pb.URLData{
+					pb.URLData_builder{
+						ShortUrl:    cfg.ShortURLBaseAddr + "/" + "gfedcba",
+						OriginalUrl: "http://bstoudwr.biz/ray1dv90xyg",
+					}.Build(),
+					pb.URLData_builder{
+						ShortUrl:    cfg.ShortURLBaseAddr + "/" + "abcdefg",
+						OriginalUrl: "https://practicum.yandex.ru/",
+					}.Build(),
+				},
+			},
+		},
+		{
+			name:   "positive no content",
+			userID: userID.String(),
+			servicesMockCall: func() {
+				s.On("GetUserURLs", userID).Return([]models.URL{}, nil).Once()
+			},
+			want: want{
+				code:   codes.OK,
+				result: []*pb.URLData(nil),
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.servicesMockCall()
+
+			ctx := metadata.NewOutgoingContext(context.Background(), md)
+			resp, err := client.ListUserURLs(ctx, &emptypb.Empty{})
+
+			statusCode := status.Code(err)
+			assert.Equal(t, test.want.code, statusCode)
+
+			switch statusCode {
+			case codes.OK:
+				assert.Equal(t, test.want.result, resp.GetUrl())
+			default:
+				assert.Equal(t, test.want.result, status.Convert(err).Message())
+			}
+		})
+	}
+}
+
+func startGRPCServer(t *testing.T, cfg *config.Config, h pb.ShortenerServiceServer) func() {
+	server := grpc.NewServer(grpc.UnaryInterceptor(middleware.AuthInterceptor(cfg.JWTSigningKey)))
+	pb.RegisterShortenerServiceServer(server, h)
+
+	listener, err := net.Listen("tcp", cfg.GRPCServerAddr)
+	require.NoError(t, err)
+
+	go func() {
+		if err = server.Serve(listener); err != nil && err != grpc.ErrServerStopped {
+			t.Logf("server stopped: %v", err)
+		}
+	}()
+
+	return server.GracefulStop
+}
+
+func initGRPCClient(t *testing.T, cfg *config.Config) (pb.ShortenerServiceClient, *grpc.ClientConn) {
+	conn, err := grpc.NewClient(cfg.GRPCServerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+
+	return pb.NewShortenerServiceClient(conn), conn
+}
+
+func initMetaData(t *testing.T, cfg *config.Config, userID uuid.UUID) metadata.MD {
+	jwtToken := jwt.NewWithClaims(jwt.SigningMethodHS256, struct {
+		jwt.RegisteredClaims
+		UserID uuid.UUID
+	}{
+		UserID: userID,
+	})
+
+	signedToken, err := jwtToken.SignedString([]byte(cfg.JWTSigningKey))
+	require.NoError(t, err)
+
+	return metadata.New(map[string]string{"authorization": "Bearer " + signedToken})
 }
