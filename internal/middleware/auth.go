@@ -1,12 +1,11 @@
 package middleware
 
 import (
-	"errors"
-	"fmt"
 	"net/http"
 
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
+	"github.com/pkg/errors"
 
 	"github.com/dsnikitin/shortener/internal/logger"
 )
@@ -81,7 +80,7 @@ func getUserID(jwtSigningKey, tokenStr string) (uuid.UUID, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, claims,
 		func(t *jwt.Token) (any, error) {
 			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+				return nil, errors.Errorf("unexpected signing method: %v", t.Header["alg"])
 			}
 
 			return []byte(jwtSigningKey), nil

@@ -36,7 +36,8 @@ func main() {
 	shutdownSignal := make(chan os.Signal, 1)
 	signal.Notify(shutdownSignal, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 
-	go app.start()
+	go app.startHTTPServer()
+	go app.startGRPCServer()
 
 	<-shutdownSignal
 

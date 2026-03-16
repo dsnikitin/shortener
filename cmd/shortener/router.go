@@ -12,7 +12,7 @@ import (
 	"github.com/dsnikitin/shortener/internal/middleware"
 )
 
-func initChiRouter(cfg *config.Config, h *handler.Handler) *chi.Mux {
+func initChiRouter(cfg *config.Config, h *handler.HTTPHandler) *chi.Mux {
 	r := chi.NewRouter()
 	r.Use(middleware.Auth(cfg.JWTSigningKey))
 	r.Use(middleware.Logging)

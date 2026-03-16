@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"database/sql"
 	"fmt"
+	"net"
 	"net/http"
 	"time"
 
@@ -14,15 +15,18 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pkg/errors"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 
+	pb "github.com/dsnikitin/shortener/api/proto"
 	"github.com/dsnikitin/shortener/internal/auditor"
 	"github.com/dsnikitin/shortener/internal/auditor/consumer"
-	"github.com/dsnikitin/shortener/internal/certx"
 	"github.com/dsnikitin/shortener/internal/config"
 	"github.com/dsnikitin/shortener/internal/config/audit"
 	"github.com/dsnikitin/shortener/internal/config/db"
 	"github.com/dsnikitin/shortener/internal/handler"
 	"github.com/dsnikitin/shortener/internal/logger"
+	"github.com/dsnikitin/shortener/internal/middleware"
 	"github.com/dsnikitin/shortener/internal/repository"
 	"github.com/dsnikitin/shortener/internal/service"
 	"github.com/dsnikitin/shortener/internal/service/deleter"
@@ -30,7 +34,8 @@ import (
 
 type app struct {
 	cfg        *config.Config
-	server     *http.Server
+	httpServer *http.Server
+	grpcServer *grpc.Server
 	service    *service.Service
 	urlDeleter *deleter.Deleter
 	auditor    *auditor.Auditor
@@ -61,38 +66,55 @@ func newApp(cfg *config.Config) *app {
 	}
 
 	s := service.New(r, urlDeleter)
-	h := handler.New(cfg.ShortURLBaseAddr, s, auditor)
+	httpHandler := handler.NewHTTPHandler(cfg.ShortURLBaseAddr, s, auditor)
+	grpcHandler := handler.NewGRPCHandler(cfg.ShortURLBaseAddr, s, auditor)
 
-	router := initChiRouter(cfg, h)
-	server := initServer(cfg, router)
+	tlsCfg, err := initTLSConfig(cfg)
+	if err != nil {
+		logger.Log.Fatalw("Failed to init tls config", "error", err)
+	}
 
 	return &app{
 		cfg:        cfg,
-		server:     server,
+		httpServer: initHTTPServer(cfg, initChiRouter(cfg, httpHandler), tlsCfg),
+		grpcServer: initGRPCServer(cfg, grpcHandler, tlsCfg),
 		service:    s,
 		urlDeleter: urlDeleter,
 		auditor:    auditor,
 	}
 }
 
-func (a *app) start() {
+func (a *app) startHTTPServer() {
 	if !a.cfg.EnableHTTPS {
-		logger.Log.Infow("Starting HTTP server", "address", a.server.Addr)
-		if err := a.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		logger.Log.Infow("Starting HTTP server", "address", a.httpServer.Addr)
+		if err := a.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Log.Fatalw("HTTP server starting failed", "error", err)
 		}
 		return
 	}
 
 	// иначе запускаем https-сервер
-	if err := a.ensureValidCert(); err != nil {
-		logger.Log.Fatalw("Failed to ensure valid cert", "error", err)
+	logger.Log.Infow("Starting HTTP server with TLS", "address", a.httpServer.Addr)
+	err := a.httpServer.ListenAndServeTLS("", "")
+	if err != nil && err != http.ErrServerClosed {
+		logger.Log.Fatalw("HTTP server starting failed", "error", err)
+	}
+}
+
+func (a *app) startGRPCServer() {
+	if !a.cfg.EnableHTTPS {
+		logger.Log.Infow("Starting gRPC server", "address", a.cfg.GRPCServerAddr)
+	} else {
+		logger.Log.Infow("Starting gRPC server with TLS", "address", a.cfg.GRPCServerAddr)
 	}
 
-	logger.Log.Infow("Starting HTTPS server", "address", a.server.Addr)
-	err := a.server.ListenAndServeTLS(a.cfg.CertFilePath, a.cfg.PrivateKeyFilePath)
-	if err != nil && err != http.ErrServerClosed {
-		logger.Log.Fatalw("HTTPS server starting failed", "error", err)
+	listener, err := net.Listen("tcp", a.cfg.GRPCServerAddr)
+	if err != nil {
+		logger.Log.Fatalw("Listener initializition failed", "error", err)
+	}
+
+	if err = a.grpcServer.Serve(listener); err != nil && err != grpc.ErrServerStopped {
+		logger.Log.Fatalw("gRPC server starting error", "error", err)
 	}
 }
 
@@ -103,19 +125,24 @@ func (a *app) shutdown() {
 		stopFn  func(ctx context.Context) error
 	}{
 		{
-			// останавливаем первым, чтобы не принимать новые запросы
-			name:    "Server",
-			stopFn:  a.server.Shutdown,
+			// сначала останавливаем серверы, чтобы не принимать новые запросы
+			name:    "HTTP Server",
+			stopFn:  a.httpServer.Shutdown,
 			timeout: time.Second * 30,
 		},
 		{
-			// останавливаем вторым, ему нужен еще не закрытый репозиторий
+			name:    "gRPC Server",
+			stopFn:  a.stopGRPCServerWithContext,
+			timeout: time.Second * 30,
+		},
+		{
+			// останавливаем перед сервисом, ему нужен еще не закрытый репозиторий
 			name:    "URL deleter",
 			stopFn:  a.urlDeleter.Stop,
 			timeout: time.Second * 30,
 		},
 		{
-			// останавливаем третьим, закрываем репозиторий
+			// останавливаем сервис, закрываем репозиторий
 			name:    "Service",
 			stopFn:  a.service.Stop,
 			timeout: time.Second * 30,
@@ -181,23 +208,75 @@ func initRepo(cfg *config.Config, db *pgxpool.Pool) (service.Repository, error) 
 	}
 }
 
-func initServer(cfg *config.Config, router http.Handler) *http.Server {
+func initTLSConfig(cfg *config.Config) (*tls.Config, error) {
+	if !cfg.EnableHTTPS {
+		return nil, nil
+	}
+
+	cert, err := tls.LoadX509KeyPair(cfg.CertFilePath, cfg.PrivateKeyFilePath)
+	if err != nil {
+		return nil, errors.Wrap(err, "load tls certificate")
+	}
+
+	tlsCfg := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS12,
+	}
+
+	return tlsCfg, nil
+}
+
+func initHTTPServer(cfg *config.Config, h http.Handler, tlsCfg *tls.Config) *http.Server {
 	server := &http.Server{
 		Addr:         cfg.ServerAddr,
-		Handler:      router,
+		Handler:      h,
 		ReadTimeout:  40 * time.Second,
 		WriteTimeout: 40 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
 
-	if cfg.EnableHTTPS {
-		tlsCfg := &tls.Config{
-			MinVersion: tls.VersionTLS12,
-		}
+	if tlsCfg != nil {
 		server.TLSConfig = tlsCfg
 	}
 
 	return server
+}
+
+func initGRPCServer(cfg *config.Config, h pb.ShortenerServiceServer, tlsCfg *tls.Config) *grpc.Server {
+	var server *grpc.Server
+	if tlsCfg != nil {
+		server = grpc.NewServer(
+			grpc.Creds(credentials.NewTLS(tlsCfg)),
+			grpc.UnaryInterceptor(middleware.AuthInterceptor(cfg.JWTSigningKey)),
+		)
+	} else {
+		server = grpc.NewServer(
+			grpc.UnaryInterceptor(middleware.AuthInterceptor(cfg.JWTSigningKey)),
+		)
+	}
+
+	pb.RegisterShortenerServiceServer(server, h)
+	return server
+}
+
+func (a *app) stopGRPCServerWithContext(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		a.grpcServer.GracefulStop()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		select {
+		case <-done:
+		default:
+			return ctx.Err()
+		}
+	}
+
+	return nil
 }
 
 func initAuditor(cfg *audit.Config) (*auditor.Auditor, error) {
@@ -228,24 +307,4 @@ func initAuditor(cfg *audit.Config) (*auditor.Auditor, error) {
 	}
 
 	return auditor.New(cfg.EventsLimit, consumers...), nil
-}
-
-func (a *app) ensureValidCert() error {
-	err := certx.CheckCert(a.cfg.CertFilePath, a.cfg.PrivateKeyFilePath)
-	if err == nil {
-		return nil
-	}
-
-	// в dev режиме генерируем самоподписанный сертификат и приватный ключ
-	if a.cfg.IsDevelop &&
-		(errors.Is(err, certx.ErrKeyFileNotFound) ||
-			errors.Is(err, certx.ErrCertFileNotFound) ||
-			errors.Is(err, certx.ErrCertNotYetValid) ||
-			errors.Is(err, certx.ErrCertExpired)) {
-
-		err = certx.GenerateSelfSignedCert(a.cfg.CertFilePath, a.cfg.PrivateKeyFilePath)
-		return errors.Wrap(err, "generate self-signed certificate")
-	}
-
-	return errors.Wrap(err, "check certificate")
 }

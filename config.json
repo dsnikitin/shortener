@@ -1,11 +1,12 @@
 {
-	"server_address": "localhost:8081",
+	"server_address": "localhost:8080",
+	"grpc_server_address": "localhost:8081",
 	"base_url": "http://localhost",
 	"log_level": "debug",
 	"file_storage_path": "storage.json",
 	"jwt_signing_key": "some_secret_key",
 	"is_develop": true,
-	"enable_https": true,
+	"enable_https": false,
 	"cert_file_path": "./certs/cert.pem",
 	"private_key_file_path": "./certs/key.pem",
 	"audit": {

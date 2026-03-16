@@ -87,7 +87,7 @@ func TestHandler_Shorten(t *testing.T) {
 	}
 
 	s := new(MockService)
-	h := handler.New(cfg.ShortURLBaseAddr, s, new(MockAuditor))
+	h := handler.NewHTTPHandler(cfg.ShortURLBaseAddr, s, new(MockAuditor))
 
 	r := chi.NewRouter()
 	r.Post("/", h.Shorten)
@@ -184,7 +184,7 @@ func ExampleHandler_Shorten() {
 	service := new(MockService)
 	service.On("CreateID", userID, originalURL).Return("abcdefg", nil).Once()
 
-	h := handler.New("http://localhost:8080", service, new(MockAuditor))
+	h := handler.NewHTTPHandler("http://localhost:8080", service, new(MockAuditor))
 
 	mux := chi.NewRouter()
 	mux.Post("/", h.Shorten)
@@ -224,7 +224,7 @@ func TestHandler_ShortenFromJSON(t *testing.T) {
 	}
 
 	s := new(MockService)
-	h := handler.New(cfg.ShortURLBaseAddr, s, new(MockAuditor))
+	h := handler.NewHTTPHandler(cfg.ShortURLBaseAddr, s, new(MockAuditor))
 
 	r := chi.NewRouter()
 	r.Post("/api/shorten", h.ShortenFromJSON)
@@ -331,7 +331,7 @@ func ExampleHandler_ShortenFromJSON() {
 	service := new(MockService)
 	service.On("CreateID", userID, req.URL).Return("abcdefg", nil).Once()
 
-	h := handler.New("http://localhost:8080", service, new(MockAuditor))
+	h := handler.NewHTTPHandler("http://localhost:8080", service, new(MockAuditor))
 
 	mux := chi.NewRouter()
 	mux.Post("/api/shorten", h.ShortenFromJSON)
@@ -376,7 +376,7 @@ func TestHandler_Redirect(t *testing.T) {
 	}
 
 	s := new(MockService)
-	h := handler.New(cfg.ShortURLBaseAddr, s, new(MockAuditor))
+	h := handler.NewHTTPHandler(cfg.ShortURLBaseAddr, s, new(MockAuditor))
 
 	r := chi.NewRouter()
 	r.Get("/{id}", h.Redirect)
@@ -483,7 +483,7 @@ func ExampleHandler_Redirect() {
 	service := new(MockService)
 	service.On("GetURL", "abcdefg").Return(url, nil).Once()
 
-	h := handler.New("http://localhost:8080", service, new(MockAuditor))
+	h := handler.NewHTTPHandler("http://localhost:8080", service, new(MockAuditor))
 
 	mux := chi.NewRouter()
 	mux.Get("/{id}", h.Redirect)
@@ -512,7 +512,7 @@ func TestHandler_PingDB(t *testing.T) {
 	}
 
 	s := new(MockService)
-	h := handler.New(cfg.ShortURLBaseAddr, s, new(MockAuditor))
+	h := handler.NewHTTPHandler(cfg.ShortURLBaseAddr, s, new(MockAuditor))
 
 	r := chi.NewRouter()
 	r.Get("/ping", h.PingDB)
@@ -591,7 +591,7 @@ func TestHandler_ShortenBatch(t *testing.T) {
 	}
 
 	s := new(MockService)
-	h := handler.New(cfg.ShortURLBaseAddr, s, new(MockAuditor))
+	h := handler.NewHTTPHandler(cfg.ShortURLBaseAddr, s, new(MockAuditor))
 
 	r := chi.NewRouter()
 	r.Post("/api/shorten/batch", h.ShortenBatch)
@@ -736,7 +736,7 @@ func ExampleHandler_ShortenBatch() {
 	ids := map[string]string{"1": "gfedcba", "2": "abcdefg"}
 	service.On("CreateIDs", userID, URLs).Return(ids, nil).Once()
 
-	h := handler.New("http://localhost:8080", service, new(MockAuditor))
+	h := handler.NewHTTPHandler("http://localhost:8080", service, new(MockAuditor))
 
 	mux := chi.NewRouter()
 	mux.Post("/api/shorten/batch", h.ShortenBatch)
@@ -787,7 +787,7 @@ func TestHandler_GetUserURLs(t *testing.T) {
 	}
 
 	s := new(MockService)
-	h := handler.New(cfg.ShortURLBaseAddr, s, new(MockAuditor))
+	h := handler.NewHTTPHandler(cfg.ShortURLBaseAddr, s, new(MockAuditor))
 
 	r := chi.NewRouter()
 	r.Get("/api/user/urls", h.GetUserURLs)
@@ -922,7 +922,7 @@ func ExampleHandler_GetUserURLs() {
 	}
 	service.On("GetUserURLs", userID).Return(urls, nil).Once()
 
-	h := handler.New("http://localhost:8080", service, new(MockAuditor))
+	h := handler.NewHTTPHandler("http://localhost:8080", service, new(MockAuditor))
 
 	mux := chi.NewRouter()
 	mux.Get("/api/user/urls", h.GetUserURLs)
