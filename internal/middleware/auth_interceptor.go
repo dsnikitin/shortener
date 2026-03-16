@@ -10,6 +10,8 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/dsnikitin/shortener/internal/logger"
+	"github.com/dsnikitin/shortener/internal/models"
+	"github.com/google/uuid"
 )
 
 // AuthInterceptor для аутентификации пользователей с помощью JWT.
@@ -32,7 +34,11 @@ func AuthInterceptor(jwtSigningKey string) grpc.UnaryServerInterceptor {
 
 		}
 
-		ctx = context.WithValue(ctx, "userID", userID)
+		if userID == uuid.Nil {
+			return nil, status.Error(codes.Unauthenticated, "empty userID in token")
+		}
+
+		ctx = models.WithUserID(ctx, userID)
 		return handler(ctx, req)
 	}
 }

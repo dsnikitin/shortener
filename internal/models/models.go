@@ -1,6 +1,25 @@
 package models
 
-import "github.com/google/uuid"
+import (
+	"context"
+
+	"github.com/google/uuid"
+)
+
+type contextKey string
+
+const userIDKey contextKey = "userID"
+
+// GetUserID получает userID из контекста.
+func GetUserID(ctx context.Context) (uuid.UUID, bool) {
+	userID, ok := ctx.Value(userIDKey).(uuid.UUID)
+	return userID, ok
+}
+
+// WithUserID добавляет userID в контекст.
+func WithUserID(ctx context.Context, userID uuid.UUID) context.Context {
+	return context.WithValue(ctx, userIDKey, userID)
+}
 
 // URL представляет модель ссылки.
 // ID - сокращенная ссылка без схемы,

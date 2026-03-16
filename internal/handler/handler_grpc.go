@@ -8,6 +8,7 @@ import (
 	"github.com/dsnikitin/shortener/internal/config"
 	"github.com/dsnikitin/shortener/internal/errx"
 	"github.com/dsnikitin/shortener/internal/logger"
+	"github.com/dsnikitin/shortener/internal/models"
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -114,17 +115,11 @@ func (h *GRPCHandler) ListUserURLs(ctx context.Context, _ *emptypb.Empty) (*pb.U
 	return resp.Build(), nil
 }
 
-// getUserID извлекает userID из контекста (должен быть добавлен интерцептором)
+// getUserID извлекает userID из контекста.
 func getUserID(ctx context.Context) (uuid.UUID, error) {
-	value := ctx.Value("userID")
-	if value == nil {
-		logger.Log.Errorw("User ID not found in context", "userID", value)
-		return uuid.Nil, status.Error(codes.Internal, "internal server error")
-	}
-
-	userID, ok := value.(uuid.UUID)
+	userID, ok := models.GetUserID(ctx)
 	if !ok {
-		logger.Log.Errorw("Invalid user ID type in context", "userID", value)
+		logger.Log.Error("User ID not found in context or has invalid type")
 		return uuid.Nil, status.Error(codes.Internal, "internal server error")
 	}
 
