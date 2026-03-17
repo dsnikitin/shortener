@@ -964,20 +964,19 @@ func TestGRPCHandler_ShortenURL(t *testing.T) {
 	userID := uuid.New()
 
 	cfg := &config.Config{
-		GRPCServerAddr:   "localhost:8080",
 		ShortURLBaseAddr: "http://localhost:8080",
 		JWTSigningKey:    "some-secret-key",
 	}
 
 	s := new(MockService)
 	h := handler.NewGRPCHandler(cfg.ShortURLBaseAddr, s, new(MockAuditor))
-	serverStopFn := startGRPCServer(t, cfg, h)
+	serverStopFn, serverAddr := startGRPCServer(t, cfg.JWTSigningKey, h)
 	defer serverStopFn()
 
-	client, conn := initGRPCClient(t, cfg)
+	client, conn := initGRPCClient(t, serverAddr)
 	defer conn.Close()
 
-	md := initMetaData(t, cfg, userID)
+	md := initMetaData(t, cfg.JWTSigningKey, userID)
 
 	type want struct {
 		code   codes.Code
@@ -1055,20 +1054,19 @@ func TestGRPCHandler_ExpandURL(t *testing.T) {
 	userID := uuid.New()
 
 	cfg := &config.Config{
-		GRPCServerAddr:   "localhost:8080",
 		ShortURLBaseAddr: "http://localhost:8080",
 		JWTSigningKey:    "some-secret-key",
 	}
 
 	s := new(MockService)
 	h := handler.NewGRPCHandler(cfg.ShortURLBaseAddr, s, new(MockAuditor))
-	serverStopFn := startGRPCServer(t, cfg, h)
+	serverStopFn, serverAddr := startGRPCServer(t, cfg.JWTSigningKey, h)
 	defer serverStopFn()
 
-	client, conn := initGRPCClient(t, cfg)
+	client, conn := initGRPCClient(t, serverAddr)
 	defer conn.Close()
 
-	md := initMetaData(t, cfg, userID)
+	md := initMetaData(t, cfg.JWTSigningKey, userID)
 
 	type want struct {
 		code   codes.Code
@@ -1163,20 +1161,19 @@ func TestGRPCHandler_ListUserURLs(t *testing.T) {
 	userID := uuid.New()
 
 	cfg := &config.Config{
-		GRPCServerAddr:   "localhost:8080",
 		ShortURLBaseAddr: "http://localhost:8080",
 		JWTSigningKey:    "some-secret-key",
 	}
 
 	s := new(MockService)
 	h := handler.NewGRPCHandler(cfg.ShortURLBaseAddr, s, new(MockAuditor))
-	serverStopFn := startGRPCServer(t, cfg, h)
+	serverStopFn, serverAddr := startGRPCServer(t, cfg.JWTSigningKey, h)
 	defer serverStopFn()
 
-	client, conn := initGRPCClient(t, cfg)
+	client, conn := initGRPCClient(t, serverAddr)
 	defer conn.Close()
 
-	md := initMetaData(t, cfg, userID)
+	md := initMetaData(t, cfg.JWTSigningKey, userID)
 
 	type want struct {
 		code   codes.Code
@@ -1248,11 +1245,11 @@ func TestGRPCHandler_ListUserURLs(t *testing.T) {
 	}
 }
 
-func startGRPCServer(t *testing.T, cfg *config.Config, h pb.ShortenerServiceServer) func() {
-	server := grpc.NewServer(grpc.UnaryInterceptor(middleware.AuthInterceptor(cfg.JWTSigningKey)))
+func startGRPCServer(t *testing.T, jwtSigningKey string, h pb.ShortenerServiceServer) (func(), string) {
+	server := grpc.NewServer(grpc.UnaryInterceptor(middleware.AuthInterceptor(jwtSigningKey)))
 	pb.RegisterShortenerServiceServer(server, h)
 
-	listener, err := net.Listen("tcp", cfg.GRPCServerAddr)
+	listener, err := net.Listen("tcp", ":0")
 	require.NoError(t, err)
 
 	go func() {
@@ -1261,17 +1258,17 @@ func startGRPCServer(t *testing.T, cfg *config.Config, h pb.ShortenerServiceServ
 		}
 	}()
 
-	return server.GracefulStop
+	return server.GracefulStop, listener.Addr().String()
 }
 
-func initGRPCClient(t *testing.T, cfg *config.Config) (pb.ShortenerServiceClient, *grpc.ClientConn) {
-	conn, err := grpc.NewClient(cfg.GRPCServerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+func initGRPCClient(t *testing.T, serverAddr string) (pb.ShortenerServiceClient, *grpc.ClientConn) {
+	conn, err := grpc.NewClient(serverAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 
 	return pb.NewShortenerServiceClient(conn), conn
 }
 
-func initMetaData(t *testing.T, cfg *config.Config, userID uuid.UUID) metadata.MD {
+func initMetaData(t *testing.T, jwtSigningKey string, userID uuid.UUID) metadata.MD {
 	jwtToken := jwt.NewWithClaims(jwt.SigningMethodHS256, struct {
 		jwt.RegisteredClaims
 		UserID uuid.UUID
@@ -1279,7 +1276,7 @@ func initMetaData(t *testing.T, cfg *config.Config, userID uuid.UUID) metadata.M
 		UserID: userID,
 	})
 
-	signedToken, err := jwtToken.SignedString([]byte(cfg.JWTSigningKey))
+	signedToken, err := jwtToken.SignedString([]byte(jwtSigningKey))
 	require.NoError(t, err)
 
 	return metadata.New(map[string]string{"authorization": "Bearer " + signedToken})

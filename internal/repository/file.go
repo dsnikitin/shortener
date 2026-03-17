@@ -149,10 +149,13 @@ func (r *File) DeleteURLs(ctx context.Context, deletableURLs []models.DeletableU
 						url.IsDeleted = true
 						r.urlsCache[deletableURL.ID] = url
 						r.mu.Unlock()
+
 						r.queue <- url
+						continue
 					}
 				}
 			}
+			r.mu.Unlock()
 		}
 	}
 }
