@@ -1,6 +1,25 @@
 package models
 
-import "github.com/google/uuid"
+import (
+	"context"
+
+	"github.com/google/uuid"
+)
+
+type contextKey string
+
+const userIDKey contextKey = "userID"
+
+// GetUserID получает userID из контекста.
+func GetUserID(ctx context.Context) (uuid.UUID, bool) {
+	userID, ok := ctx.Value(userIDKey).(uuid.UUID)
+	return userID, ok
+}
+
+// WithUserID добавляет userID в контекст.
+func WithUserID(ctx context.Context, userID uuid.UUID) context.Context {
+	return context.WithValue(ctx, userIDKey, userID)
+}
 
 // URL представляет модель ссылки.
 // ID - сокращенная ссылка без схемы,
@@ -72,4 +91,13 @@ type Event struct {
 	Action      Action `json:"action"`
 	UserID      string `json:"user_id,omitempty"`
 	OriginalURL string `json:"url"`
+}
+
+// Stats представляет статистику по сервиса.
+// generate:reset
+type Stats struct {
+	// количество сокращённых URL в сервисе
+	URLs int `json:"urls"`
+	// количество пользователей в сервисе
+	Users int `json:"users"`
 }

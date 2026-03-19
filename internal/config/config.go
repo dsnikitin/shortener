@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"flag"
+	"net"
 	"net/url"
 	"os"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/caarlos0/env"
 	"github.com/pkg/errors"
 
+	"github.com/dsnikitin/shortener/internal/certx"
 	"github.com/dsnikitin/shortener/internal/config/audit"
 	"github.com/dsnikitin/shortener/internal/config/db"
 )
@@ -26,6 +28,7 @@ const (
 // Config содержит конфигурацию приложения.
 type Config struct {
 	ServerAddr         string        `env:"SERVER_ADDRESS" json:"server_address"`
+	GRPCServerAddr     string        `env:"GRPC_SERVER_ADDRESS" json:"grpc_server_address"`
 	ShortURLBaseAddr   string        `env:"BASE_URL" json:"base_url"`
 	LogLevel           string        `env:"LOG_LEVEL" json:"log_level"`
 	FileStoragePath    string        `env:"FILE_STORAGE_PATH" json:"file_storage_path"`
@@ -36,6 +39,8 @@ type Config struct {
 	PrivateKeyFilePath string        `env:"PRIVATE_KEY_FILE_PATH" json:"private_key_file_path"`
 	DataBase           *db.Config    `envPrefix:"DATABASE_" json:"database"`
 	Audit              *audit.Config `envPrefix:"AUDIT_" json:"audit"`
+	TrustedSubnetCIDR  string        `env:"TRUSTED_SUBNET" json:"trusted_subnet"`
+	TrustedSubnet      *net.IPNet    `env:"-" json:"-"`
 	ConfigFilePath     string        `env:"CONFIG" json:"-"`
 }
 
@@ -46,8 +51,9 @@ func New() (*Config, error) {
 		Audit:    &audit.Config{},
 	}
 
-	flag.StringVar(&cfg.ServerAddr, "a", "localhost:8080", "server host:port")
-	flag.StringVar(&cfg.ShortURLBaseAddr, "b", "https://localhost:8080", "base short url")
+	flag.StringVar(&cfg.ServerAddr, "a", "localhost:8080", "HTTP server host:port")
+	flag.StringVar(&cfg.GRPCServerAddr, "ga", "localhost:8081", "gRPC server host:port")
+	flag.StringVar(&cfg.ShortURLBaseAddr, "b", "http://localhost:8080", "base short url")
 	flag.StringVar(&cfg.LogLevel, "l", "info", "log level")
 	flag.StringVar(&cfg.FileStoragePath, "f", "shortener_storage.json", "file storage path")
 	flag.BoolVar(&cfg.IsDevelop, "dev", false, "is develop environment")
@@ -61,6 +67,7 @@ func New() (*Config, error) {
 	flag.StringVar(&cfg.CertFilePath, "cert-file", "", "path to file with cert for https")
 	flag.StringVar(&cfg.PrivateKeyFilePath, "key-file", "", "path to file with private key for https")
 	flag.StringVar(&cfg.ConfigFilePath, "c", "", "path to config file")
+	flag.StringVar(&cfg.TrustedSubnetCIDR, "t", "", "trusted subnet in CIDR format")
 	flag.StringVar(&cfg.ConfigFilePath, "config", "", "path to config file")
 
 	flag.Parse()
@@ -71,7 +78,8 @@ func New() (*Config, error) {
 		}
 	}
 
-	if err := env.Parse(cfg); err != nil {
+	err := env.Parse(cfg)
+	if err != nil {
 		return nil, errors.Wrap(err, "parse envs")
 	}
 
@@ -79,7 +87,7 @@ func New() (*Config, error) {
 		if baseURL, err := url.Parse(cfg.ShortURLBaseAddr); err != nil {
 			return nil, errors.Wrap(err, "parse short url base address")
 		} else if baseURL.Scheme != "https" {
-			return nil, errors.New("Short url base address must use https scheme")
+			return nil, errors.New("short url base address must use https scheme")
 		}
 
 		if cfg.CertFilePath == "" {
@@ -88,6 +96,16 @@ func New() (*Config, error) {
 
 		if cfg.PrivateKeyFilePath == "" {
 			return nil, errors.New("empty private key file path")
+		}
+
+		if err := ensureValidCert(cfg); err != nil {
+			return nil, errors.New("ensure valid cert")
+		}
+	}
+
+	if cfg.TrustedSubnetCIDR != "" {
+		if _, cfg.TrustedSubnet, err = net.ParseCIDR(cfg.TrustedSubnetCIDR); err != nil {
+			return nil, errors.Wrap(err, "parse cidr")
 		}
 	}
 
@@ -113,4 +131,24 @@ func loadFromJSONFile(cfg *Config) error {
 	// заполняет только пустые поля в cfg значениями из fileCfg
 	err = mergo.Merge(cfg, fileCfg)
 	return errors.Wrap(err, "merge configs")
+}
+
+func ensureValidCert(cfg *Config) error {
+	err := certx.CheckCert(cfg.CertFilePath, cfg.PrivateKeyFilePath)
+	if err == nil {
+		return nil
+	}
+
+	// в dev режиме генерируем самоподписанный сертификат и приватный ключ
+	if cfg.IsDevelop &&
+		(errors.Is(err, certx.ErrKeyFileNotFound) ||
+			errors.Is(err, certx.ErrCertFileNotFound) ||
+			errors.Is(err, certx.ErrCertNotYetValid) ||
+			errors.Is(err, certx.ErrCertExpired)) {
+
+		err = certx.GenerateSelfSignedCert(cfg.CertFilePath, cfg.PrivateKeyFilePath)
+		return errors.Wrap(err, "generate self-signed certificate")
+	}
+
+	return errors.Wrap(err, "check cert")
 }

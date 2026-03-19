@@ -82,7 +82,7 @@ func (r *File) Save(ctx context.Context, url models.URL) error {
 		}
 		r.mu.Unlock()
 
-		// отправляем на запсиь в файл
+		// отправляем на запись в файл
 		r.queue <- url
 		return nil
 	}
@@ -114,6 +114,9 @@ func (r *File) GetURL(ctx context.Context, id string) (models.URL, error) {
 
 // GetUserURLs возвращает все URLs пользователя.
 func (r *File) GetUserURLs(ctx context.Context, userID uuid.UUID) ([]models.URL, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	var urls []models.URL
 
 	ids, ok := r.userUrlsCache[userID]
@@ -139,17 +142,32 @@ func (r *File) DeleteURLs(ctx context.Context, deletableURLs []models.DeletableU
 			logger.Log.Warnw("Failed to delete urls because file repository closed", "not deleted urls", deletableURLs[i:])
 			return
 		default:
+			r.mu.Lock()
 			if ids, ok := r.userUrlsCache[deletableURL.CreatorID]; ok {
 				if _, ok := ids[deletableURL.ID]; ok {
 					if url, ok := r.urlsCache[deletableURL.ID]; ok {
 						url.IsDeleted = true
 						r.urlsCache[deletableURL.ID] = url
+						r.mu.Unlock()
+
 						r.queue <- url
+						continue
 					}
 				}
 			}
+			r.mu.Unlock()
 		}
 	}
+}
+
+func (r *File) GetStats(ctx context.Context) (models.Stats, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return models.Stats{
+		URLs:  len(r.urlsCache),
+		Users: len(r.userUrlsCache),
+	}, nil
 }
 
 // PingDB проверяет соединение с хранилищем (не реализовано для файлового хранилища).

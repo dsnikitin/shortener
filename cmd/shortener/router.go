@@ -12,7 +12,7 @@ import (
 	"github.com/dsnikitin/shortener/internal/middleware"
 )
 
-func initChiRouter(cfg *config.Config, h *handler.Handler) *chi.Mux {
+func initChiRouter(cfg *config.Config, h *handler.HTTPHandler) *chi.Mux {
 	r := chi.NewRouter()
 	r.Use(middleware.Auth(cfg.JWTSigningKey))
 	r.Use(middleware.Logging)
@@ -24,6 +24,8 @@ func initChiRouter(cfg *config.Config, h *handler.Handler) *chi.Mux {
 	r.Get("/ping", http.HandlerFunc(h.PingDB))
 
 	r.Route("/api", func(r chi.Router) {
+		r.With(middleware.SubnetGuard(cfg.TrustedSubnet)).
+			Get("/internal/stats", http.HandlerFunc(h.GetStats))
 		r.With(middleware.BodyMaxBytesReader(config.OriginalURLMaxLength)).
 			Post("/shorten", http.HandlerFunc(h.ShortenFromJSON))
 		r.With(middleware.BodyMaxBytesReader(config.OriginalURLMaxBatchLength)).

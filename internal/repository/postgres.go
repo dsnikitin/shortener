@@ -2,12 +2,11 @@ package repository
 
 import (
 	"context"
-	"errors"
-	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/pkg/errors"
 
 	"github.com/dsnikitin/shortener/internal/errx"
 	"github.com/dsnikitin/shortener/internal/logger"
@@ -41,7 +40,7 @@ func (r *Postgres) GetURL(ctx context.Context, id string) (models.URL, error) {
 
 	var url models.URL
 	if err := row.Scan(&url.ID, &url.Original, &url.CreatorID, &url.IsDeleted); err != nil {
-		return models.URL{}, fmt.Errorf("scan: %w", err)
+		return models.URL{}, errors.Wrap(err, "scan row")
 	}
 
 	return url, nil
@@ -58,7 +57,7 @@ func (r *Postgres) Save(ctx context.Context, url models.URL) error {
 	res, err := r.db.Exec(
 		ctx, saveSQL, pgx.NamedArgs{"id": url.ID, "original": url.Original, "creatorID": url.CreatorID})
 	if err != nil {
-		return fmt.Errorf("exec: %w", err)
+		return errors.Wrap(err, "exec sql")
 	}
 
 	if res.RowsAffected() == 0 {
@@ -72,7 +71,7 @@ func (r *Postgres) Save(ctx context.Context, url models.URL) error {
 func (r *Postgres) SaveMany(ctx context.Context, urls []models.URL) error {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
+		return errors.Wrap(err, "begin tx")
 	}
 	defer tx.Rollback(ctx)
 
@@ -93,7 +92,7 @@ func (r *Postgres) SaveMany(ctx context.Context, urls []models.URL) error {
 	for i := range urls {
 		res, err := br.Exec()
 		if err != nil {
-			return fmt.Errorf("exec error on url %s: %w", urls[i].Original, err)
+			return errors.Wrapf(err, "exec error on url %s", urls[i].Original)
 		}
 
 		if res.RowsAffected() == 0 {
@@ -102,11 +101,11 @@ func (r *Postgres) SaveMany(ctx context.Context, urls []models.URL) error {
 	}
 
 	if err := br.Close(); err != nil {
-		return fmt.Errorf("close batch: %w", err)
+		return errors.Wrap(err, "close batch")
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
+		return errors.Wrap(err, "commit transaction")
 	}
 
 	return nil
@@ -122,7 +121,7 @@ const getUserURLsSQL = `
 func (r *Postgres) GetUserURLs(ctx context.Context, userID uuid.UUID) ([]models.URL, error) {
 	rows, err := r.db.Query(ctx, getUserURLsSQL, pgx.NamedArgs{"creatorID": userID})
 	if err != nil {
-		return nil, fmt.Errorf("query: %w", err)
+		return nil, errors.Wrap(err, "query rows")
 	}
 	defer rows.Close()
 
@@ -130,14 +129,14 @@ func (r *Postgres) GetUserURLs(ctx context.Context, userID uuid.UUID) ([]models.
 	for rows.Next() {
 		var url models.URL
 		if err = rows.Scan(&url.ID, &url.Original, &url.CreatorID, &url.IsDeleted); err != nil {
-			return nil, fmt.Errorf("scan row: %w", err)
+			return nil, errors.Wrap(err, "scan row")
 		}
 
 		urls = append(urls, url)
 	}
 
 	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("iteration error: %w", err)
+		return nil, errors.Wrap(err, "rows iteration error")
 	}
 
 	return urls, nil
@@ -168,6 +167,22 @@ func (r *Postgres) DeleteURLs(ctx context.Context, urls []models.DeletableURL) {
 			logger.Log.Errorw("Failed to delete url", "ID", urls[i].ID, "error", err)
 		}
 	}
+}
+
+const getStatsSQL = `
+	SELECT COUNT(id) AS urls_count, COUNT(DISTINCT creator_id) AS users_count
+	FROM shortener.urls
+`
+
+func (r *Postgres) GetStats(ctx context.Context) (models.Stats, error) {
+	row := r.db.QueryRow(ctx, getStatsSQL)
+
+	var stats models.Stats
+	if err := row.Scan(&stats.URLs, &stats.Users); err != nil {
+		return models.Stats{}, errors.Wrap(err, "scan row")
+	}
+
+	return stats, nil
 }
 
 // Close закрывает соединение с PostgreSQL.

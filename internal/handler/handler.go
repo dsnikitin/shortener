@@ -26,6 +26,7 @@ type Service interface {
 	PingDB(ctx context.Context) error
 	GetUserURLs(ctx context.Context, userID uuid.UUID) ([]models.URL, error)
 	DeleteUserURLs(ctx context.Context, userID uuid.UUID, ids []string) error
+	GetStats(ctx context.Context) (models.Stats, error)
 }
 
 // Auditor определяет интерфейс аудитора событий.
@@ -33,16 +34,16 @@ type Auditor interface {
 	PublishEvent(event models.Event)
 }
 
-// Handler представляет HTTP обработчики сервиса сокращения ссылок.
-type Handler struct {
+// HTTPHandler представляет HTTP обработчики сервиса сокращения ссылок.
+type HTTPHandler struct {
 	shortURLBaseAddr string
 	s                Service
 	auditor          Auditor
 }
 
-// New создает новый экземпляр Handler.
-func New(shortURLBaseAddr string, s Service, auditor Auditor) *Handler {
-	return &Handler{
+// NewHTTPHandler создает новый экземпляр HTTPHandler.
+func NewHTTPHandler(shortURLBaseAddr string, s Service, auditor Auditor) *HTTPHandler {
+	return &HTTPHandler{
 		shortURLBaseAddr: shortURLBaseAddr,
 		s:                s,
 		auditor:          auditor,
@@ -52,7 +53,7 @@ func New(shortURLBaseAddr string, s Service, auditor Auditor) *Handler {
 // Shorten обрабатывает запрос на создание короткого URL из текстового тела.
 // Ожидает plain text в теле запроса, возвращает короткий URL в текстовом виде.
 // При успехе возвращает статус 201 Created или 409 Conflict, если URL уже существует.
-func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
+func (h *HTTPHandler) Shorten(w http.ResponseWriter, r *http.Request) {
 	userID, ok := parseUserID(w, r)
 	if !ok {
 		return
@@ -104,7 +105,7 @@ func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
 // ShortenFromJSON обрабатывает запрос на создание короткого URL из JSON.
 // Ожидает JSON тело вида {"url": "..."}. Возвращает JSON ответ вида {"result": "..."} с коротким URL.
 // При успехе возвращает статус 201 Created или 409 Conflict, если URL уже существует.
-func (h *Handler) ShortenFromJSON(w http.ResponseWriter, r *http.Request) {
+func (h *HTTPHandler) ShortenFromJSON(w http.ResponseWriter, r *http.Request) {
 	userID, ok := parseUserID(w, r)
 	if !ok {
 		return
@@ -157,7 +158,7 @@ func (h *Handler) ShortenFromJSON(w http.ResponseWriter, r *http.Request) {
 // Ожидает JSON массив объектов {"correlation_id": "...", "original_url": "..."}.
 // Возвращает массив объектов {"correlation_id": "...", "short_url": "..."}.
 // При успехе возвращает статус 201 Created или 409 Conflict, если какой-либо URL уже существует.
-func (h *Handler) ShortenBatch(w http.ResponseWriter, r *http.Request) {
+func (h *HTTPHandler) ShortenBatch(w http.ResponseWriter, r *http.Request) {
 	userID, ok := parseUserID(w, r)
 	if !ok {
 		return
@@ -213,7 +214,7 @@ func (h *Handler) ShortenBatch(w http.ResponseWriter, r *http.Request) {
 // Redirect обрабатывает запрос по короткой сслыке и выполняет редирект на оригинальный URL.
 // Если URL помечен как удаленный, возвращает статус 410 Gone.
 // В противном случае выполняет временный редирект 307.
-func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request) {
+func (h *HTTPHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if id == "" || len(id) > config.IDMaxLength {
 		http.Error(w, "incorrect id", http.StatusBadRequest)
@@ -248,7 +249,7 @@ func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request) {
 
 // PingDB проверяет доступность базы данных и возвращает статус 200 OK при успехе.
 // При ошибке возвращает статус 500 Internal Server Error.
-func (h *Handler) PingDB(w http.ResponseWriter, r *http.Request) {
+func (h *HTTPHandler) PingDB(w http.ResponseWriter, r *http.Request) {
 	if err := h.s.PingDB(r.Context()); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -261,7 +262,7 @@ func (h *Handler) PingDB(w http.ResponseWriter, r *http.Request) {
 // GetUserURLs возвращает список всех неудаленных URL пользователя.
 // Возвращает JSON массив объектов  {"short_url": "...", "original_url": "..."}.
 // Если ни одного URL нет, возвращает статус 204 No Content.
-func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
+func (h *HTTPHandler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	userID, ok := parseUserID(w, r)
 	if !ok {
 		return
@@ -300,7 +301,7 @@ func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 
 // DeleteUserURLs обрабатывает запрос на пометку как удаленные URLs пользователя.
 // Ожидает JSON массив коротких ссылок. Возвращает статус 202 Accepted при успехе.
-func (h *Handler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
+func (h *HTTPHandler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
 	userID, ok := parseUserID(w, r)
 	if !ok {
 		return
@@ -327,7 +328,23 @@ func (h *Handler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
-func (h *Handler) sendBatchResponse(
+func (h *HTTPHandler) GetStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := h.s.GetStats(r.Context())
+	if err != nil {
+		logger.Log.Errorw("Get stats", "error", err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(stats); err != nil {
+		logger.Log.Errorw("Encoding stats response", "error", err)
+		return
+	}
+}
+
+func (h *HTTPHandler) sendBatchResponse(
 	w http.ResponseWriter, req []models.ShortenBatchRequest, ids map[string]string,
 ) {
 	resp := make([]models.ShortenBatchResponse, 0, len(req))
